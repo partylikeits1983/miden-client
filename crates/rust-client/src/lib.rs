@@ -60,7 +60,7 @@
 //!     store::{sqlite_store::SqliteStore, Store},
 //!     Client, Felt,
 //! };
-//! use miden_objects::crypto::rand::FeltRng;
+//! use miden_objects::crypto::rand::{FeltRng, RpoRandomCoin};
 //! use rand::Rng;
 //!
 //! # pub async fn create_test_client() -> Result<(), Box<dyn std::error::Error>> {
@@ -120,6 +120,12 @@ pub mod mock;
 
 #[cfg(test)]
 pub mod tests;
+
+#[cfg(feature = "std")]
+pub mod builder;
+
+#[cfg(feature = "std")]
+pub use builder::ClientBuilder;
 
 mod errors;
 
@@ -188,7 +194,7 @@ pub mod testing {
 
 use alloc::sync::Arc;
 
-use miden_objects::crypto::rand::FeltRng;
+use miden_objects::crypto::rand::{FeltRng, RpoRandomCoin};
 use miden_tx::{
     auth::TransactionAuthenticator, DataStore, LocalTransactionProver, TransactionExecutor,
 };
@@ -298,5 +304,15 @@ impl<R: FeltRng> Client<R> {
     #[cfg(any(test, feature = "testing"))]
     pub fn test_store(&mut self) -> &mut Arc<dyn Store> {
         &mut self.store
+    }
+}
+
+// BUILDER ENTRY POINT (OPTIONAL HELPER)
+// --------------------------------------------------------------------------------------------
+
+#[cfg(feature = "std")]
+impl Client<RpoRandomCoin> {
+    pub fn initialize() -> ClientBuilder {
+        ClientBuilder::new()
     }
 }
