@@ -23,6 +23,7 @@
 * Improved Web Client Publishing Flow on Next Branch (#906).
 * [BREAKING] Refactored `TransactionRequestBuilder` preset builders (#901).
 * Improved the consumability check of the `NoteScreener` (#898).
+* Exposed new test utilities in the `testing` feature (#882).
 
 ## 0.8.2 (TBD)
 
