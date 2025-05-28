@@ -1,3 +1,12 @@
+use alloc::string::String;
+use core::ops::{Deref, DerefMut};
+
+use api_client_wrapper::{ApiClient, InnerClient};
+use tonic::{
+    metadata::{AsciiMetadataValue, errors::InvalidMetadataValue},
+    service::Interceptor,
+};
+
 // WEB CLIENT
 // ================================================================================================
 
@@ -8,16 +17,22 @@ compile_error!("The `web-tonic` feature is only supported when targeting wasm32.
 pub(crate) mod api_client_wrapper {
     use alloc::string::String;
 
-    use crate::rpc::RpcError;
+    use tonic::service::interceptor::InterceptedService;
 
-    pub type ApiClient =
-        crate::rpc::generated::rpc::api_client::ApiClient<tonic_web_wasm_client::Client>;
+    use super::{MetadataInterceptor, accept_header_interceptor};
+    use crate::rpc::{RpcError, generated::rpc::api_client::ApiClient as ProtoClient};
+
+    pub type WasmClient = tonic_web_wasm_client::Client;
+    pub type InnerClient = ProtoClient<InterceptedService<WasmClient, MetadataInterceptor>>;
+    #[derive(Clone)]
+    pub struct ApiClient(pub(crate) InnerClient);
 
     impl ApiClient {
         #[allow(clippy::unused_async)]
         pub async fn new_client(endpoint: String, _timeout_ms: u64) -> Result<ApiClient, RpcError> {
-            let wasm_client = tonic_web_wasm_client::Client::new(endpoint);
-            Ok(ApiClient::new(wasm_client))
+            let wasm_client = WasmClient::new(endpoint);
+            let interceptor = accept_header_interceptor();
+            Ok(ApiClient(ProtoClient::with_interceptor(wasm_client, interceptor)))
         }
     }
 }
@@ -28,17 +43,11 @@ pub(crate) mod api_client_wrapper {
 #[cfg(feature = "tonic")]
 pub(crate) mod api_client_wrapper {
     use alloc::{boxed::Box, string::String};
-    use core::{
-        ops::{Deref, DerefMut},
-        time::Duration,
-    };
+    use core::time::Duration;
 
-    use tonic::{
-        metadata::{AsciiMetadataValue, errors::InvalidMetadataValue},
-        service::{Interceptor, interceptor::InterceptedService},
-        transport::Channel,
-    };
+    use tonic::{service::interceptor::InterceptedService, transport::Channel};
 
+    use super::{MetadataInterceptor, accept_header_interceptor};
     use crate::rpc::{RpcError, generated::rpc::api_client::ApiClient as ProtoClient};
 
     pub type InnerClient = ProtoClient<InterceptedService<Channel, MetadataInterceptor>>;
@@ -68,60 +77,57 @@ pub(crate) mod api_client_wrapper {
             Ok(ApiClient(ProtoClient::with_interceptor(channel, interceptor)))
         }
     }
+}
 
-    impl Deref for ApiClient {
-        type Target = InnerClient;
-        fn deref(&self) -> &Self::Target {
-            &self.0
+impl Deref for ApiClient {
+    type Target = InnerClient;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for ApiClient {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+// INTERCEPTOR
+// ================================================================================================
+
+/// Interceptor designed to inject required metadata into all [`ApiClient`] requests.
+#[derive(Default, Clone)]
+pub struct MetadataInterceptor {
+    metadata: alloc::collections::BTreeMap<&'static str, AsciiMetadataValue>,
+}
+
+impl MetadataInterceptor {
+    /// Adds or overwrites metadata to the interceptor.
+    pub fn with_metadata(
+        mut self,
+        key: &'static str,
+        value: String,
+    ) -> Result<Self, InvalidMetadataValue> {
+        self.metadata.insert(key, AsciiMetadataValue::try_from(value)?);
+        Ok(self)
+    }
+}
+
+impl Interceptor for MetadataInterceptor {
+    fn call(&mut self, request: tonic::Request<()>) -> Result<tonic::Request<()>, tonic::Status> {
+        let mut request = request;
+        for (key, value) in &self.metadata {
+            request.metadata_mut().insert(*key, value.clone());
         }
+        Ok(request)
     }
+}
 
-    impl DerefMut for ApiClient {
-        fn deref_mut(&mut self) -> &mut Self::Target {
-            &mut self.0
-        }
-    }
-
-    // INTERCEPTOR
-    // ================================================================================================
-
-    /// Interceptor designed to inject required metadata into all [`ApiClient`] requests.
-    #[derive(Default, Clone)]
-    pub struct MetadataInterceptor {
-        metadata: alloc::collections::BTreeMap<&'static str, AsciiMetadataValue>,
-    }
-
-    impl MetadataInterceptor {
-        /// Adds or overwrites metadata to the interceptor.
-        pub fn with_metadata(
-            mut self,
-            key: &'static str,
-            value: String,
-        ) -> Result<Self, InvalidMetadataValue> {
-            self.metadata.insert(key, AsciiMetadataValue::try_from(value)?);
-            Ok(self)
-        }
-    }
-
-    impl Interceptor for MetadataInterceptor {
-        fn call(
-            &mut self,
-            request: tonic::Request<()>,
-        ) -> Result<tonic::Request<()>, tonic::Status> {
-            let mut request = request;
-            for (key, value) in &self.metadata {
-                request.metadata_mut().insert(*key, value.clone());
-            }
-            Ok(request)
-        }
-    }
-
-    /// Returns the HTTP ACCEPT header [`MetadataInterceptor`] that is expected by Miden RPC.
-    fn accept_header_interceptor() -> MetadataInterceptor {
-        let version = env!("CARGO_PKG_VERSION");
-        let accept_value = format!("application/vnd.miden.{version}+grpc");
-        MetadataInterceptor::default()
-            .with_metadata("accept", accept_value)
-            .expect("valid key/value metadata for interceptor")
-    }
+/// Returns the HTTP ACCEPT header [`MetadataInterceptor`] that is expected by Miden RPC.
+fn accept_header_interceptor() -> MetadataInterceptor {
+    let version = env!("CARGO_PKG_VERSION");
+    let accept_value = format!("application/vnd.miden.{version}+grpc");
+    MetadataInterceptor::default()
+        .with_metadata("accept", accept_value)
+        .expect("valid key/value metadata for interceptor")
 }
