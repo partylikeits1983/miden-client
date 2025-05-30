@@ -311,6 +311,8 @@ pub struct TransactionDetails {
     pub output_notes: OutputNotes,
     /// Block number for the block against which the transaction was executed.
     pub block_num: BlockNumber,
+    /// Block number at which the transaction was submitted.
+    pub submission_height: BlockNumber,
     /// Block number at which the transaction is set to expire.
     pub expiration_block_num: BlockNumber,
 }
@@ -323,6 +325,7 @@ impl Serializable for TransactionDetails {
         self.input_note_nullifiers.write_into(target);
         self.output_notes.write_into(target);
         self.block_num.write_into(target);
+        self.submission_height.write_into(target);
         self.expiration_block_num.write_into(target);
     }
 }
@@ -335,6 +338,7 @@ impl Deserializable for TransactionDetails {
         let input_note_nullifiers = Vec::<Digest>::read_from(source)?;
         let output_notes = OutputNotes::read_from(source)?;
         let block_num = BlockNumber::read_from(source)?;
+        let submission_height = BlockNumber::read_from(source)?;
         let expiration_block_num = BlockNumber::read_from(source)?;
 
         Ok(Self {
@@ -344,6 +348,7 @@ impl Deserializable for TransactionDetails {
             input_note_nullifiers,
             output_notes,
             block_num,
+            submission_height,
             expiration_block_num,
         })
     }
@@ -422,7 +427,7 @@ impl fmt::Display for TransactionStatus {
             TransactionStatus::Committed(block_number) => {
                 write!(f, "Committed (Block: {block_number})")
             },
-            TransactionStatus::Discarded(_) => write!(f, "Discarded"),
+            TransactionStatus::Discarded(cause) => write!(f, "Discarded ({cause})",),
         }
     }
 }
@@ -435,6 +440,8 @@ impl fmt::Display for TransactionStatus {
 pub struct TransactionStoreUpdate {
     /// Details of the executed transaction to be inserted.
     executed_transaction: ExecutedTransaction,
+    /// Block number at which the transaction was submitted.
+    submission_height: BlockNumber,
     /// Updated account state after the [`AccountDelta`] has been applied.
     updated_account: Account,
     /// Information about note changes after the transaction execution.
@@ -445,14 +452,24 @@ pub struct TransactionStoreUpdate {
 
 impl TransactionStoreUpdate {
     /// Creates a new [`TransactionStoreUpdate`] instance.
+    ///
+    /// # Arguments
+    /// - `executed_transaction`: The executed transaction details.
+    /// - `submission_height`: The block number at which the transaction was submitted.
+    /// - `updated_account`: The updated account state after applying the transaction.
+    /// - `note_updates`: The note updates that need to be applied to the store after the
+    ///   transaction execution.
+    /// - `new_tags`: New note tags that were need to be tracked because of created notes.
     pub fn new(
         executed_transaction: ExecutedTransaction,
+        submission_height: BlockNumber,
         updated_account: Account,
         note_updates: NoteUpdateTracker,
         new_tags: Vec<NoteTagRecord>,
     ) -> Self {
         Self {
             executed_transaction,
+            submission_height,
             updated_account,
             note_updates,
             new_tags,
@@ -462,6 +479,11 @@ impl TransactionStoreUpdate {
     /// Returns the executed transaction.
     pub fn executed_transaction(&self) -> &ExecutedTransaction {
         &self.executed_transaction
+    }
+
+    /// Returns the block number at which the transaction was submitted.
+    pub fn submission_height(&self) -> BlockNumber {
+        self.submission_height
     }
 
     /// Returns the updated account.
@@ -669,8 +691,8 @@ impl Client {
         tx_prover: Arc<dyn TransactionProver>,
     ) -> Result<(), ClientError> {
         let proven_transaction = self.prove_transaction(&tx_result, tx_prover).await?;
-        self.submit_proven_transaction(proven_transaction).await?;
-        self.apply_transaction(tx_result).await
+        let block_num = self.submit_proven_transaction(proven_transaction).await?;
+        self.apply_transaction(block_num, tx_result).await
     }
 
     /// Proves the specified transaction result using the provided prover.
@@ -692,17 +714,20 @@ impl Client {
     async fn submit_proven_transaction(
         &mut self,
         proven_transaction: ProvenTransaction,
-    ) -> Result<(), ClientError> {
+    ) -> Result<BlockNumber, ClientError> {
         info!("Submitting transaction to the network...");
-        self.rpc_api.submit_proven_transaction(proven_transaction).await?;
+        let block_num = self.rpc_api.submit_proven_transaction(proven_transaction).await?;
         info!("Transaction submitted.");
 
-        Ok(())
+        Ok(block_num)
     }
 
-    async fn apply_transaction(&self, tx_result: TransactionResult) -> Result<(), ClientError> {
+    async fn apply_transaction(
+        &self,
+        submission_height: BlockNumber,
+        tx_result: TransactionResult,
+    ) -> Result<(), ClientError> {
         let transaction_id = tx_result.executed_transaction().id();
-        let sync_height = self.get_sync_height().await?;
 
         // Transaction was proven and submitted to the node correctly, persist note details and
         // update account
@@ -751,7 +776,7 @@ impl Client {
             .iter()
             .cloned()
             .filter_map(|output_note| {
-                OutputNoteRecord::try_from_output_note(output_note, sync_height).ok()
+                OutputNoteRecord::try_from_output_note(output_note, submission_height).ok()
             })
             .collect::<Vec<_>>();
 
@@ -775,8 +800,13 @@ impl Client {
             created_output_notes,
         );
 
-        let tx_update =
-            TransactionStoreUpdate::new(tx_result.into(), account, note_updates, new_tags);
+        let tx_update = TransactionStoreUpdate::new(
+            tx_result.into(),
+            submission_height,
+            account,
+            note_updates,
+            new_tags,
+        );
 
         self.store.apply_transaction(tx_update).await?;
         info!("Transaction stored.");
@@ -1145,7 +1175,7 @@ impl Client {
     pub async fn testing_submit_proven_transaction(
         &mut self,
         proven_transaction: ProvenTransaction,
-    ) -> Result<(), ClientError> {
+    ) -> Result<BlockNumber, ClientError> {
         self.submit_proven_transaction(proven_transaction).await
     }
 
@@ -1153,7 +1183,7 @@ impl Client {
         &self,
         tx_result: TransactionResult,
     ) -> Result<(), ClientError> {
-        self.apply_transaction(tx_result).await
+        self.apply_transaction(self.get_sync_height().await.unwrap(), tx_result).await
     }
 }
 
