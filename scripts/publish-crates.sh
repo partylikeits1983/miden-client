@@ -23,12 +23,6 @@ git pull origin main
 # Publish
 echo "Publishing crates..."
 
-# Publish miden-client-web
-# This should use wasm32-unknown-unknown as target (specified on crates/web-client/config.toml,
-# but publishing from the workspace root does not take it into account)
-echo "Publishing miden-client-web..."
-cargo publish -p miden-client-web --target wasm32-unknown-unknown
-
 crates=(
     miden-client
     miden-cli
@@ -38,3 +32,9 @@ for crate in ${crates[@]}; do
     echo "Publishing $crate..."
     cargo publish -p "$crate" 
 done
+
+# Publish miden-client-web
+# This should use wasm32-unknown-unknown as target (specified on crates/web-client/config.toml,
+# but publishing from the workspace root does not take it into account)
+echo "Publishing miden-client-web..."
+cargo publish -p miden-client-web --target wasm32-unknown-unknown
