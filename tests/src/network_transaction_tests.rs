@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, vec};
 
 use miden_client::{
     Felt, Word, ZERO,
@@ -54,8 +54,11 @@ const COUNTER_CONTRACT: &str = "
         end";
 
 /// Deploys a counter contract as a network account
-async fn deploy_counter_contract(client: &mut TestClient) -> Result<(Account, Library), String> {
-    let (acc, seed, library) = get_counter_contract_account(client).await;
+async fn deploy_counter_contract(
+    client: &mut TestClient,
+    storage_mode: AccountStorageMode,
+) -> Result<(Account, Library), String> {
+    let (acc, seed, library) = get_counter_contract_account(client, storage_mode).await;
 
     client.add_account(&acc, Some(seed), false).await.unwrap();
 
@@ -83,7 +86,10 @@ async fn deploy_counter_contract(client: &mut TestClient) -> Result<(Account, Li
     Ok((acc, library))
 }
 
-async fn get_counter_contract_account(client: &mut TestClient) -> (Account, Word, Library) {
+async fn get_counter_contract_account(
+    client: &mut TestClient,
+    storage_mode: AccountStorageMode,
+) -> (Account, Word, Library) {
     let counter_component = AccountComponent::compile(
         COUNTER_CONTRACT,
         TransactionKernel::assembler(),
@@ -96,7 +102,7 @@ async fn get_counter_contract_account(client: &mut TestClient) -> (Account, Word
     client.rng().fill_bytes(&mut init_seed);
 
     let (account, seed) = AccountBuilder::new(init_seed)
-        .storage_mode(AccountStorageMode::Network)
+        .storage_mode(storage_mode)
         .with_component(counter_component)
         .build()
         .unwrap();
@@ -124,7 +130,8 @@ async fn counter_contract_ntx() {
     let (mut client, keystore) = create_test_client().await;
     client.sync_state().await.unwrap();
 
-    let (network_account, library) = deploy_counter_contract(&mut client).await.unwrap();
+    let (network_account, library) =
+        deploy_counter_contract(&mut client, AccountStorageMode::Network).await.unwrap();
 
     assert_eq!(
         client
@@ -191,5 +198,93 @@ async fn counter_contract_ntx() {
     assert_eq!(
         a.storage().get_item(0).unwrap(),
         Digest::from([ZERO, ZERO, ZERO, Felt::new(1 + BUMP_NOTE_NUMBER)])
+    );
+}
+
+#[tokio::test]
+async fn recall_note_before_ntx_consumes_it() {
+    let (mut client, keystore) = create_test_client().await;
+    client.sync_state().await.unwrap();
+
+    let (network_account, library) =
+        deploy_counter_contract(&mut client, AccountStorageMode::Network).await.unwrap();
+
+    let native_account = deploy_counter_contract(&mut client, AccountStorageMode::Public)
+        .await
+        .unwrap()
+        .0;
+
+    let wallet = insert_new_wallet(&mut client, AccountStorageMode::Public, &keystore)
+        .await
+        .unwrap()
+        .0;
+
+    println!("A");
+
+    let assembler = TransactionKernel::assembler()
+        .with_debug_mode(true)
+        .with_library(library)
+        .unwrap();
+
+    let network_note = NoteBuilder::new(wallet.id(), client.rng())
+        .code(
+            "use.external_contract::counter_contract
+            begin
+                call.counter_contract::increment_count
+            end",
+        )
+        .tag(
+            NoteTag::from_account_id(network_account.id(), NoteExecutionMode::Network)
+                .unwrap()
+                .into(),
+        )
+        .build(&assembler)
+        .unwrap();
+
+    let tx_request = TransactionRequestBuilder::new()
+        .with_own_output_notes(vec![OutputNote::Full(network_note.clone())])
+        .build()
+        .unwrap();
+
+    println!("B");
+
+    // Create the note directed to the network account
+    execute_tx_and_sync(&mut client, wallet.id(), tx_request).await;
+
+    let tx_request = TransactionRequestBuilder::new()
+        .build_consume_notes(vec![network_note.id()])
+        .unwrap();
+
+    // Consume the note before the network transaction
+    execute_tx_and_sync(&mut client, native_account.id(), tx_request).await;
+
+    wait_for_blocks(&mut client, 2).await;
+
+    // The network account should have original value
+    assert_eq!(
+        client
+            .get_account(network_account.id())
+            .await
+            .unwrap()
+            .unwrap()
+            .account()
+            .storage()
+            .get_item(0)
+            .unwrap(),
+        Digest::from([ZERO, ZERO, ZERO, Felt::new(1)])
+    );
+
+    // The native account should have the incremented value
+    assert_eq!(
+        client
+            .get_account(native_account.id())
+            .await
+            .unwrap()
+            .unwrap()
+            .account()
+            .storage()
+            .get_item(0)
+            .unwrap(),
+        Digest::from([ZERO, ZERO, ZERO, Felt::new(2)])
     );
 }
