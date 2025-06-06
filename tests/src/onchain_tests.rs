@@ -120,7 +120,7 @@ async fn get_counter_contract_account(client: &mut TestClient) -> (Account, Word
 // ================================================================================================
 
 #[tokio::test]
-async fn test_onchain_notes_flow() {
+async fn onchain_notes_flow() {
     // Client 1 is an private faucet which will mint an onchain note for client 2
     let (mut client_1, keystore_1) = create_test_client().await;
     // Client 2 is an private account which will consume the note that it will sync from the node
@@ -243,7 +243,7 @@ async fn test_onchain_notes_flow() {
 }
 
 #[tokio::test]
-async fn test_onchain_accounts() {
+async fn onchain_accounts() {
     let (mut client_1, keystore_1) = create_test_client().await;
     let (mut client_2, keystore_2) = create_test_client().await;
     wait_for_node(&mut client_2).await;
@@ -424,7 +424,7 @@ async fn test_onchain_accounts() {
 }
 
 #[tokio::test]
-async fn test_import_account_by_id() {
+async fn import_account_by_id() {
     let (mut client_1, keystore_1) = create_test_client().await;
     let (mut client_2, keystore_2) = create_test_client().await;
     wait_for_node(&mut client_1).await;
@@ -482,7 +482,7 @@ async fn test_import_account_by_id() {
 }
 
 #[tokio::test]
-async fn test_counter_contract_ntx() {
+async fn counter_contract_ntx() {
     const BUMP_NOTE_NUMBER: u64 = 5;
     let (mut client, keystore) = create_test_client().await;
     client.sync_state().await.unwrap();
