@@ -62,3 +62,10 @@ You can run the integration tests against a remote node by overwriting the rpc s
 ## CI integration
 
 There is a step for the CI at `../.github/workflows/ci.yml` used to run the integration tests.
+
+## Test filtering
+You can filter the tests to run by using the `FILTER` environment variable when running the make command. You may filter by test module or by test name. For example, to run only the fpi tests (`fpi_tests` module), you can do:
+
+```bash
+make integration-test FILTER=fpi_tests
+```
