@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.1 (TBD)
+
+### Changes
+
+* Fixed wasm-opt options to improve performance of generated wasm (#961).
+
 ## 0.9.0 (2025-05-30)
 
 ### Features
