@@ -11,7 +11,7 @@ Before you can use the Miden client, you'll need to make sure you have both [Rus
 You can either build from source with:
 
 ```bash
-cargo build --release
+cargo build --release --locked
 ```
 
 Once the binary is built, you can find it on `./target/release/miden-client`.
@@ -19,7 +19,7 @@ Once the binary is built, you can find it on `./target/release/miden-client`.
 Or you can install the CLI from crates.io with:
 
 ```bash
-cargo install miden-client-cli
+cargo install miden-client-cli --locked
 ```
 
 These actions can also be executed when inside the repository via the Makefile with `make build` or `make install`.

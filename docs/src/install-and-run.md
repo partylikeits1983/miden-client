@@ -7,7 +7,7 @@
 Run the following command to install the miden-client:
 
 ```sh
-cargo install miden-client-cli
+cargo install miden-client-cli --locked
 ```
 
 This installs the `miden-client` binary (at `~/.cargo/bin/miden-client`).
