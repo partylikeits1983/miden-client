@@ -2,9 +2,13 @@
 
 ## 0.10.0 (TBD)
 
+### Changes
+
+* [BREAKING] Renamed `miden-cli` crate to `miden-client-cli`, and the `miden` executable to `miden-client` (#960).
+
 ### Features
 
-* Support Operations From Counter Contract FPI Example in Web Client (#958).
+* Added support for FPI in Web Client (#958).
 
 ## 0.9.1 (TBD)
 
