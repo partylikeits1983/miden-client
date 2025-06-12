@@ -10,6 +10,14 @@
 
 * Added support for FPI in Web Client (#958).
 
+## 0.9.2 (2025-06-11)
+
+* Refresh dependencies (#972).
+
+### Changes
+
+* Fixed wasm-opt options to improve performance of generated wasm (#961).
+
 ## 0.9.0 (2025-05-30)
 
 ### Features
