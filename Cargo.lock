@@ -1372,7 +1372,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
 dependencies = [
  "cfg-if",
- "windows-targets 0.53.1",
+ "windows-targets 0.53.0",
 ]
 
 [[package]]
@@ -1580,7 +1580,7 @@ dependencies = [
 [[package]]
 name = "miden-block-prover"
 version = "0.10.0"
-source = "git+https://github.com/0xMiden/miden-base?branch=next#43232ab0492236648d57d0ebd1e43d2643792949"
+source = "git+https://github.com/0xMiden/miden-base?branch=next#e6fa50d819d68571d49055db479301546de08a8f"
 dependencies = [
  "miden-lib",
  "miden-objects",
@@ -1602,7 +1602,7 @@ dependencies = [
  "miden-lib",
  "miden-node-proto-build",
  "miden-objects",
- "miden-proving-service-client 0.10.0 (git+https://github.com/0xMiden/miden-node?branch=igamigo-midenp-lib-nostd)",
+ "miden-proving-service-client",
  "miden-testing",
  "miden-tx",
  "miette",
@@ -1729,7 +1729,7 @@ dependencies = [
 [[package]]
 name = "miden-lib"
 version = "0.10.0"
-source = "git+https://github.com/0xMiden/miden-base?branch=next#43232ab0492236648d57d0ebd1e43d2643792949"
+source = "git+https://github.com/0xMiden/miden-base?branch=next#e6fa50d819d68571d49055db479301546de08a8f"
 dependencies = [
  "miden-assembly",
  "miden-objects",
@@ -1784,7 +1784,7 @@ dependencies = [
 [[package]]
 name = "miden-node-block-producer"
 version = "0.10.0"
-source = "git+https://github.com/0xMiden/miden-node?branch=next#46b2b71b12aad1df9a74fb045b2672cdd4bc6c35"
+source = "git+https://github.com/0xMiden/miden-node?branch=next#831b9098b4bd2531121135a3ef190c781acd22d1"
 dependencies = [
  "anyhow",
  "futures",
@@ -1795,7 +1795,7 @@ dependencies = [
  "miden-node-proto-build",
  "miden-node-utils",
  "miden-objects",
- "miden-proving-service-client 0.10.0 (git+https://github.com/0xMiden/miden-node?branch=next)",
+ "miden-proving-service-client",
  "miden-tx",
  "miden-tx-batch-prover",
  "rand 0.9.1",
@@ -1812,7 +1812,7 @@ dependencies = [
 [[package]]
 name = "miden-node-ntx-builder"
 version = "0.10.0"
-source = "git+https://github.com/0xMiden/miden-node?branch=next#46b2b71b12aad1df9a74fb045b2672cdd4bc6c35"
+source = "git+https://github.com/0xMiden/miden-node?branch=next#831b9098b4bd2531121135a3ef190c781acd22d1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1823,7 +1823,7 @@ dependencies = [
  "miden-node-proto-build",
  "miden-node-utils",
  "miden-objects",
- "miden-proving-service-client 0.10.0 (git+https://github.com/0xMiden/miden-node?branch=next)",
+ "miden-proving-service-client",
  "miden-tx",
  "rand 0.9.1",
  "thiserror 2.0.12",
@@ -1839,7 +1839,7 @@ dependencies = [
 [[package]]
 name = "miden-node-proto"
 version = "0.10.0"
-source = "git+https://github.com/0xMiden/miden-node?branch=next#46b2b71b12aad1df9a74fb045b2672cdd4bc6c35"
+source = "git+https://github.com/0xMiden/miden-node?branch=next#831b9098b4bd2531121135a3ef190c781acd22d1"
 dependencies = [
  "anyhow",
  "hex",
@@ -1858,7 +1858,7 @@ dependencies = [
 [[package]]
 name = "miden-node-proto-build"
 version = "0.10.0"
-source = "git+https://github.com/0xMiden/miden-node?branch=next#46b2b71b12aad1df9a74fb045b2672cdd4bc6c35"
+source = "git+https://github.com/0xMiden/miden-node?branch=next#831b9098b4bd2531121135a3ef190c781acd22d1"
 dependencies = [
  "anyhow",
  "prost",
@@ -1869,7 +1869,7 @@ dependencies = [
 [[package]]
 name = "miden-node-rpc"
 version = "0.10.0"
-source = "git+https://github.com/0xMiden/miden-node?branch=next#46b2b71b12aad1df9a74fb045b2672cdd4bc6c35"
+source = "git+https://github.com/0xMiden/miden-node?branch=next#831b9098b4bd2531121135a3ef190c781acd22d1"
 dependencies = [
  "anyhow",
  "futures",
@@ -1895,7 +1895,7 @@ dependencies = [
 [[package]]
 name = "miden-node-store"
 version = "0.10.0"
-source = "git+https://github.com/0xMiden/miden-node?branch=next#46b2b71b12aad1df9a74fb045b2672cdd4bc6c35"
+source = "git+https://github.com/0xMiden/miden-node?branch=next#831b9098b4bd2531121135a3ef190c781acd22d1"
 dependencies = [
  "anyhow",
  "deadpool",
@@ -1920,7 +1920,7 @@ dependencies = [
 [[package]]
 name = "miden-node-utils"
 version = "0.10.0"
-source = "git+https://github.com/0xMiden/miden-node?branch=next#46b2b71b12aad1df9a74fb045b2672cdd4bc6c35"
+source = "git+https://github.com/0xMiden/miden-node?branch=next#831b9098b4bd2531121135a3ef190c781acd22d1"
 dependencies = [
  "anyhow",
  "figment",
@@ -1943,7 +1943,7 @@ dependencies = [
 [[package]]
 name = "miden-objects"
 version = "0.10.0"
-source = "git+https://github.com/0xMiden/miden-base?branch=next#43232ab0492236648d57d0ebd1e43d2643792949"
+source = "git+https://github.com/0xMiden/miden-base?branch=next#e6fa50d819d68571d49055db479301546de08a8f"
 dependencies = [
  "bech32",
  "getrandom 0.3.3",
@@ -1991,27 +1991,7 @@ dependencies = [
 [[package]]
 name = "miden-proving-service-client"
 version = "0.10.0"
-source = "git+https://github.com/0xMiden/miden-node?branch=igamigo-midenp-lib-nostd#0535d4f226a90108a4ddd707c316cd34dc0e39bc"
-dependencies = [
- "async-trait",
- "getrandom 0.3.3",
- "miden-objects",
- "miden-tx",
- "miette",
- "prost",
- "prost-build",
- "protox 0.7.2",
- "thiserror 2.0.12",
- "tokio",
- "tonic 0.12.3",
- "tonic-build 0.12.3",
- "tonic-web-wasm-client 0.6.2",
-]
-
-[[package]]
-name = "miden-proving-service-client"
-version = "0.10.0"
-source = "git+https://github.com/0xMiden/miden-node?branch=next#46b2b71b12aad1df9a74fb045b2672cdd4bc6c35"
+source = "git+https://github.com/0xMiden/miden-node?branch=next#831b9098b4bd2531121135a3ef190c781acd22d1"
 dependencies = [
  "async-trait",
  "getrandom 0.3.3",
@@ -2041,7 +2021,7 @@ dependencies = [
 [[package]]
 name = "miden-testing"
 version = "0.10.0"
-source = "git+https://github.com/0xMiden/miden-base?branch=next#43232ab0492236648d57d0ebd1e43d2643792949"
+source = "git+https://github.com/0xMiden/miden-base?branch=next#e6fa50d819d68571d49055db479301546de08a8f"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2060,7 +2040,7 @@ dependencies = [
 [[package]]
 name = "miden-tx"
 version = "0.10.0"
-source = "git+https://github.com/0xMiden/miden-base?branch=next#43232ab0492236648d57d0ebd1e43d2643792949"
+source = "git+https://github.com/0xMiden/miden-base?branch=next#e6fa50d819d68571d49055db479301546de08a8f"
 dependencies = [
  "async-trait",
  "miden-lib",
@@ -2076,7 +2056,7 @@ dependencies = [
 [[package]]
 name = "miden-tx-batch-prover"
 version = "0.10.0"
-source = "git+https://github.com/0xMiden/miden-base?branch=next#43232ab0492236648d57d0ebd1e43d2643792949"
+source = "git+https://github.com/0xMiden/miden-base?branch=next#e6fa50d819d68571d49055db479301546de08a8f"
 dependencies = [
  "miden-objects",
  "miden-tx",
@@ -2861,9 +2841,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.5.12"
+version = "0.5.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "928fca9cf2aa042393a8325b9ead81d2f0df4cb12e1e24cef072922ccd99c5af"
+checksum = "0d04b7d0ee6b4a0207a0a7adb104d23ecb0b47d6beae7152d0fa34b692b29fd6"
 dependencies = [
  "bitflags",
 ]
@@ -4302,9 +4282,9 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "windows"
-version = "0.61.2"
+version = "0.61.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2b85ac982d24496e0b49912479da8a89c0ba7b1d8bf6de49df12af42e94b325"
+checksum = "c5ee8f3d025738cb02bad7868bbb5f8a6327501e870bf51f1b455b0a2454a419"
 dependencies = [
  "windows-collections",
  "windows-core",
@@ -4370,9 +4350,9 @@ dependencies = [
 
 [[package]]
 name = "windows-link"
-version = "0.1.2"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3bfe459f85da17560875b8bf1423d6f113b7a87a5d942e7da0ac71be7c61f8b"
+checksum = "76840935b766e1b0a05c0066835fb9ec80071d4c09a16f6bd5f7e655e3c14c38"
 
 [[package]]
 name = "windows-numerics"
@@ -4462,9 +4442,9 @@ dependencies = [
 
 [[package]]
 name = "windows-targets"
-version = "0.53.1"
+version = "0.53.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30357ec391cde730f8fbfcdc29adc47518b06504528df977ab5af02ef23fdee9"
+checksum = "b1e4c7e8ceaaf9cb7d7507c974735728ab453b67ef8f18febdd7c11fe59dca8b"
 dependencies = [
  "windows_aarch64_gnullvm 0.53.0",
  "windows_aarch64_msvc 0.53.0",
