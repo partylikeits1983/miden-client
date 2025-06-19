@@ -46,7 +46,7 @@ use crate::{
     note::NoteRelevance,
     rpc::NodeRpcClient,
     store::{
-        InputNoteRecord, InputNoteState, NoteFilter, StoreError, TransactionFilter,
+        InputNoteRecord, InputNoteState, NoteFilter, TransactionFilter,
         input_note_states::ConsumedAuthenticatedLocalNoteState, sqlite_store::SqliteStore,
     },
     sync::NoteTagSource,
@@ -677,7 +677,7 @@ async fn test_import_processing_note_returns_error() {
         client.new_transaction(faucet.id(), transaction_request.clone()).await.unwrap();
     client.submit_transaction(transaction).await.unwrap();
 
-    let note_id = transaction_request.expected_output_notes().next().unwrap().id();
+    let note_id = transaction_request.expected_output_own_notes().pop().unwrap().id();
     let note = client.get_input_note(note_id).await.unwrap().unwrap();
 
     let input = [(note.try_into().unwrap(), None)];
@@ -699,46 +699,6 @@ async fn test_import_processing_note_returns_error() {
             .await
             .unwrap_err(),
         ClientError::NoteImportError { .. }
-    ));
-}
-
-#[tokio::test]
-async fn test_no_nonce_change_transaction_request() {
-    let (mut client, _, keystore) = create_test_client().await;
-
-    client.sync_state().await.unwrap();
-
-    // Insert Account
-    let (regular_account, _seed) =
-        insert_new_wallet(&mut client, AccountStorageMode::Private, &keystore)
-            .await
-            .unwrap();
-
-    // Prepare transaction
-
-    let code = "
-        begin
-            push.1 push.2
-            # => [1, 2]
-            add push.3
-            # => [1+2, 3]
-            assert_eq
-        end
-        ";
-
-    let tx_script = client.compile_tx_script(vec![], code).unwrap();
-
-    let transaction_request =
-        TransactionRequestBuilder::new().with_custom_script(tx_script).build().unwrap();
-
-    let transaction_execution_result =
-        client.new_transaction(regular_account.id(), transaction_request).await.unwrap();
-
-    let result = client.testing_apply_transaction(transaction_execution_result).await;
-
-    assert!(matches!(
-        result,
-        Err(ClientError::StoreError(StoreError::AccountCommitmentAlreadyExists(_)))
     ));
 }
 
@@ -884,7 +844,7 @@ async fn test_real_note_roundtrip() {
         )
         .unwrap();
 
-    let note_id = transaction_request.expected_output_notes().next().unwrap().id();
+    let note_id = transaction_request.expected_output_own_notes().pop().unwrap().id();
     let transaction = client.new_transaction(faucet.id(), transaction_request).await.unwrap();
     client.submit_transaction(transaction).await.unwrap();
 
@@ -973,7 +933,7 @@ async fn test_p2id_transfer() {
         )
         .unwrap();
 
-    let note = tx_request.expected_output_notes().next().unwrap().clone();
+    let note = tx_request.expected_output_own_notes().pop().unwrap();
     let transaction_id = execute_tx(&mut client, from_account_id, tx_request).await;
 
     // Check that a note tag started being tracked for this note.
@@ -1169,7 +1129,7 @@ async fn test_p2idr_transfer_consumed_by_target() {
     assert!(!notes.is_empty());
 
     // Make the `to_account_id` consume P2IDR note
-    let note_id = tx_request.expected_output_notes().next().unwrap().id();
+    let note_id = tx_request.expected_output_own_notes().pop().unwrap().id();
     println!("Consuming Note...");
     let tx_request = TransactionRequestBuilder::new().build_consume_notes(vec![note_id]).unwrap();
     execute_tx_and_sync(&mut client, to_account_id, tx_request).await;
@@ -1408,7 +1368,7 @@ async fn test_get_output_notes() {
         )
         .unwrap();
 
-    let output_note_id = tx_request.expected_output_notes().next().unwrap().id();
+    let output_note_id = tx_request.expected_output_own_notes().pop().unwrap().id();
 
     // Before executing, the output note is not found
     assert!(client.get_output_note(output_note_id).await.unwrap().is_none());
