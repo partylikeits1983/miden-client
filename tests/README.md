@@ -20,6 +20,8 @@ make integration-test-full
 
 Note that in order to run this as part of a CI/CD workflow (at least on github), you'll need to use `make start-node-background` instead so the process keeps running on background.
 
+To stop the background node, you can use the `make stop-node` command.
+
 ## Integration Test Flow
 
 The integration test goes through a series of supported flows such as minting and transferring assets which runs against a running node.
@@ -62,10 +64,3 @@ You can run the integration tests against a remote node by overwriting the rpc s
 ## CI integration
 
 There is a step for the CI at `../.github/workflows/ci.yml` used to run the integration tests.
-
-## Test filtering
-You can filter the tests to run by using the `FILTER` environment variable when running the make command. You may filter by test module or by test name. For example, to run only the fpi tests (`fpi_tests` module), you can do:
-
-```bash
-make integration-test FILTER=fpi_tests
-```
