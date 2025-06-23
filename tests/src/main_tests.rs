@@ -176,7 +176,8 @@ async fn import_expected_notes() {
             client_2.rng(),
         )
         .unwrap();
-    let note: InputNoteRecord = tx_request.expected_output_notes().next().unwrap().clone().into();
+    let note: InputNoteRecord =
+        tx_request.expected_output_own_notes().pop().unwrap().clone().into();
     client_2.sync_state().await.unwrap();
 
     // If the verification is requested before execution then the import should fail
@@ -210,7 +211,8 @@ async fn import_expected_notes() {
             client_2.rng(),
         )
         .unwrap();
-    let note: InputNoteRecord = tx_request.expected_output_notes().next().unwrap().clone().into();
+    let note: InputNoteRecord =
+        tx_request.expected_output_own_notes().pop().unwrap().clone().into();
 
     // Import an uncommited note without verification
     client_2.add_note_tag(note.metadata().unwrap().tag()).await.unwrap();
@@ -265,7 +267,8 @@ async fn import_expected_note_uncommitted() {
         )
         .unwrap();
 
-    let note: InputNoteRecord = tx_request.expected_output_notes().next().unwrap().clone().into();
+    let note: InputNoteRecord =
+        tx_request.expected_output_own_notes().pop().unwrap().clone().into();
     client_2.sync_state().await.unwrap();
 
     // If the verification is requested before execution then the import should fail
@@ -301,7 +304,8 @@ async fn import_expected_notes_from_the_past_as_committed() {
             client_1.rng(),
         )
         .unwrap();
-    let note: InputNoteRecord = tx_request.expected_output_notes().next().unwrap().clone().into();
+    let note: InputNoteRecord =
+        tx_request.expected_output_own_notes().pop().unwrap().clone().into();
 
     let block_height_before = client_1.get_sync_height().await.unwrap();
 
@@ -401,7 +405,7 @@ async fn sync_detail_values() {
             client1.rng(),
         )
         .unwrap();
-    let note_id = tx_request.expected_output_notes().next().unwrap().id();
+    let note_id = tx_request.expected_output_own_notes().pop().unwrap().id();
     execute_tx_and_sync(&mut client1, from_account_id, tx_request).await;
 
     // Second client sync should have new note
@@ -454,7 +458,7 @@ async fn multiple_transactions_can_be_committed_in_different_blocks_without_sync
         let transaction_id = transaction_execution_result.executed_transaction().id();
 
         println!("Sending transaction to node");
-        let note_id = tx_request.expected_output_notes().next().unwrap().id();
+        let note_id = tx_request.expected_output_own_notes().pop().unwrap().id();
         client.submit_transaction(transaction_execution_result).await.unwrap();
 
         (note_id, transaction_id)
@@ -482,7 +486,7 @@ async fn multiple_transactions_can_be_committed_in_different_blocks_without_sync
 
         println!("Sending transaction to node");
         // May need a few attempts until it gets included
-        let note_id = tx_request.expected_output_notes().next().unwrap().id();
+        let note_id = tx_request.expected_output_own_notes().pop().unwrap().id();
         while client
             .test_rpc_api()
             .get_notes_by_id(&[first_note_id])
@@ -519,7 +523,7 @@ async fn multiple_transactions_can_be_committed_in_different_blocks_without_sync
 
         println!("Sending transaction to node");
         // May need a few attempts until it gets included
-        let note_id = tx_request.expected_output_notes().next().unwrap().id();
+        let note_id = tx_request.expected_output_own_notes().pop().unwrap().id();
         while client
             .test_rpc_api()
             .get_notes_by_id(&[second_note_id])
@@ -603,7 +607,7 @@ async fn consume_multiple_expected_notes() {
     unauth_client.sync_state().await.unwrap();
 
     // Filter notes by ownership
-    let expected_notes = mint_tx_request.expected_output_notes();
+    let expected_notes = mint_tx_request.expected_output_own_notes().into_iter();
     let client_notes: Vec<_> = client.get_input_notes(NoteFilter::All).await.unwrap();
     let client_notes_ids: Vec<_> = client_notes.iter().map(|note| note.id()).collect();
 

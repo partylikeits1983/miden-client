@@ -3,7 +3,7 @@ use std::{sync::Arc, vec};
 use miden_client::{
     Felt, Word, ZERO,
     account::{Account, AccountBuilder, AccountStorageMode, StorageSlot},
-    note::{NoteExecutionMode, NoteTag},
+    note::NoteTag,
     testing::{
         common::{
             TestClient, create_test_client, execute_tx_and_sync, insert_new_wallet,
@@ -167,11 +167,7 @@ async fn counter_contract_ntx() {
                     call.counter_contract::increment_count
                 end",
                 )
-                .tag(
-                    NoteTag::from_account_id(network_account.id(), NoteExecutionMode::Network)
-                        .unwrap()
-                        .into(),
-                )
+                .tag(NoteTag::from_account_id(network_account.id()).into())
                 .build(&assembler)
                 .unwrap(),
         ));
@@ -233,11 +229,7 @@ async fn recall_note_before_ntx_consumes_it() {
                 call.counter_contract::increment_count
             end",
         )
-        .tag(
-            NoteTag::from_account_id(network_account.id(), NoteExecutionMode::Network)
-                .unwrap()
-                .into(),
-        )
+        .tag(NoteTag::from_account_id(network_account.id()).into())
         .build(&assembler)
         .unwrap();
 

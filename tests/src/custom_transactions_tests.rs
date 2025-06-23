@@ -15,10 +15,7 @@ use miden_objects::{
         merkle::{MerkleStore, MerkleTree, NodeIndex},
         rand::{FeltRng, RpoRandomCoin},
     },
-    note::{
-        Note, NoteAssets, NoteExecutionMode, NoteInputs, NoteMetadata, NoteRecipient, NoteTag,
-        NoteType,
-    },
+    note::{Note, NoteAssets, NoteInputs, NoteMetadata, NoteRecipient, NoteTag, NoteType},
     transaction::OutputNote,
     vm::AdviceMap,
 };
@@ -263,7 +260,7 @@ async fn onchain_notes_sync_with_tag() {
     let note_metadata = NoteMetadata::new(
         basic_account_1.id(),
         NoteType::Public,
-        NoteTag::from_account_id(basic_account_1.id(), NoteExecutionMode::Local).unwrap(),
+        NoteTag::from_account_id(basic_account_1.id()),
         NoteExecutionHint::None,
         Default::default(),
     )
@@ -278,14 +275,12 @@ async fn onchain_notes_sync_with_tag() {
         .build()
         .unwrap();
 
-    let note = tx_request.expected_output_notes().next().unwrap().clone();
+    let note = tx_request.expected_output_own_notes().pop().unwrap().clone();
     execute_tx_and_sync(&mut client_1, basic_account_1.id(), tx_request).await;
 
     // Load tag into client 2
     client_2
-        .add_note_tag(
-            NoteTag::from_account_id(basic_account_1.id(), NoteExecutionMode::Local).unwrap(),
-        )
+        .add_note_tag(NoteTag::from_account_id(basic_account_1.id()))
         .await
         .unwrap();
 
@@ -343,7 +338,7 @@ fn create_custom_note(
     let note_metadata = NoteMetadata::new(
         faucet_account_id,
         NoteType::Private,
-        NoteTag::from_account_id(target_account_id, NoteExecutionMode::Local).unwrap(),
+        NoteTag::from_account_id(target_account_id),
         NoteExecutionHint::None,
         Default::default(),
     )
