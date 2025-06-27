@@ -9,8 +9,8 @@ use miden_objects::{AccountIdError, asset::TokenSymbol};
 use rand::RngCore;
 use wasm_bindgen::prelude::*;
 
-use super::models::{account::Account, account_storage_mode::AccountStorageMode, word::Word};
-use crate::{WebClient, helpers::generate_wallet, js_error_with_context};
+use super::models::{account::Account, account_storage_mode::AccountStorageMode};
+use crate::{WebClient, helpers::generate_wallet, js_error_with_context, models::word::Word};
 
 #[wasm_bindgen]
 impl WebClient {
