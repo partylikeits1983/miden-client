@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.9.4 (2025-07-01)
+## v0.9.4 (2025-07-02)
 
 * Support Operations From Counter Contract FPI Example in Web Client (#958).
 

@@ -1,9 +1,9 @@
 [package]
 name = "miden-client"
-version = "0.9.3"
+version = "0.9.4"
 description = "Client library that facilitates interaction with the Miden rollup"
 readme = "README.md"
-documentation = "https://docs.rs/miden-client/0.9.3"
+documentation = "https://docs.rs/miden-client/0.9.4"
 categories = ["no-std"]
 keywords = ["miden", "client"]
 license.workspace = true
