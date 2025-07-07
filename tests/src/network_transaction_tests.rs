@@ -47,11 +47,16 @@ const COUNTER_CONTRACT: &str = "
             # [index, count+1]
             exec.account::set_item
             # => []
-            push.1 exec.account::incr_nonce
-            # => []
             exec.sys::truncate_stack
             # => []
         end";
+
+const INCR_NONCE_AUTH_CODE: &str = "
+    use.miden::account
+    export.auth__basic
+        push.1 exec.account::incr_nonce
+    end
+";
 
 /// Deploys a counter contract as a network account
 async fn deploy_counter_contract(
@@ -68,7 +73,6 @@ async fn deploy_counter_contract(
         begin
             call.counter_contract::increment_count
         end",
-        [],
         assembler.with_library(&library).unwrap(),
     )
     .unwrap();
@@ -98,12 +102,18 @@ async fn get_counter_contract_account(
     .unwrap()
     .with_supports_all_types();
 
+    let incr_nonce_auth =
+        AccountComponent::compile(INCR_NONCE_AUTH_CODE, TransactionKernel::assembler(), vec![])
+            .unwrap()
+            .with_supports_all_types();
+
     let mut init_seed = [0u8; 32];
     client.rng().fill_bytes(&mut init_seed);
 
     let (account, seed) = AccountBuilder::new(init_seed)
         .storage_mode(storage_mode)
         .with_component(counter_component)
+        .with_auth_component(incr_nonce_auth)
         .build()
         .unwrap();
 
@@ -215,8 +225,6 @@ async fn recall_note_before_ntx_consumes_it() {
         .unwrap()
         .0;
 
-    println!("A");
-
     let assembler = TransactionKernel::assembler()
         .with_debug_mode(true)
         .with_library(library)
@@ -233,22 +241,31 @@ async fn recall_note_before_ntx_consumes_it() {
         .build(&assembler)
         .unwrap();
 
+    // Prepare both transactions
     let tx_request = TransactionRequestBuilder::new()
         .with_own_output_notes(vec![OutputNote::Full(network_note.clone())])
         .build()
         .unwrap();
 
-    println!("B");
-
-    // Create the note directed to the network account
-    execute_tx_and_sync(&mut client, wallet.id(), tx_request).await;
+    let bump_transaction = client.new_transaction(wallet.id(), tx_request).await.unwrap();
+    client.testing_apply_transaction(bump_transaction.clone()).await.unwrap();
 
     let tx_request = TransactionRequestBuilder::new()
-        .build_consume_notes(vec![network_note.id()])
+        .with_unauthenticated_input_notes(vec![(network_note, None)])
+        .build()
         .unwrap();
 
-    // Consume the note before the network transaction
-    execute_tx_and_sync(&mut client, native_account.id(), tx_request).await;
+    let consume_transaction =
+        client.new_transaction(native_account.id(), tx_request).await.unwrap();
+
+    let bump_proof = client.testing_prove_transaction(&bump_transaction).await.unwrap();
+    let consume_proof = client.testing_prove_transaction(&consume_transaction).await.unwrap();
+
+    // Submit both transactions
+    client.testing_submit_proven_transaction(bump_proof).await.unwrap();
+    client.testing_submit_proven_transaction(consume_proof).await.unwrap();
+
+    client.testing_apply_transaction(consume_transaction).await.unwrap();
 
     wait_for_blocks(&mut client, 2).await;
 

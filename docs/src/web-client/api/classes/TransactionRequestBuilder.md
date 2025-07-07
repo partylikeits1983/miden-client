@@ -134,22 +134,6 @@
 
 ***
 
-### withForeignAccounts()
-
-> **withForeignAccounts**(`foreign_accounts`): `TransactionRequestBuilder`
-
-#### Parameters
-
-##### foreign\_accounts
-
-[`ForeignAccount`](ForeignAccount.md)[]
-
-#### Returns
-
-`TransactionRequestBuilder`
-
-***
-
 ### withOwnOutputNotes()
 
 > **withOwnOutputNotes**(`notes`): `TransactionRequestBuilder`

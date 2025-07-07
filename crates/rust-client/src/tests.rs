@@ -8,24 +8,27 @@ use miden_lib::{
         auth::RpoFalcon512, faucets::BasicFungibleFaucet, interface::AccountInterfaceError,
         wallets::BasicWallet,
     },
-    note::utils,
+    note::{utils, well_known_note::WellKnownNote},
     transaction::TransactionKernel,
 };
 use miden_objects::{
-    Felt, FieldElement, Word, ZERO,
+    EMPTY_WORD, Felt, FieldElement, ONE, Word, ZERO,
     account::{
         Account, AccountBuilder, AccountCode, AccountHeader, AccountId, AccountStorageMode,
         AccountType, AuthSecretKey,
     },
     asset::{Asset, FungibleAsset, TokenSymbol},
     crypto::{
-        dsa::rpo_falcon512::SecretKey,
+        dsa::rpo_falcon512::{PublicKey, SecretKey},
         rand::{FeltRng, RpoRandomCoin},
     },
-    note::{Note, NoteAssets, NoteExecutionHint, NoteFile, NoteMetadata, NoteTag, NoteType},
+    note::{
+        Note, NoteAssets, NoteExecutionHint, NoteFile, NoteInputs, NoteMetadata, NoteRecipient,
+        NoteTag, NoteType,
+    },
     testing::account_id::{
-        ACCOUNT_ID_PUBLIC_FUNGIBLE_FAUCET_1, ACCOUNT_ID_PUBLIC_FUNGIBLE_FAUCET_2,
-        ACCOUNT_ID_REGULAR_PRIVATE_ACCOUNT_UPDATABLE_CODE,
+        ACCOUNT_ID_PRIVATE_SENDER, ACCOUNT_ID_PUBLIC_FUNGIBLE_FAUCET_1,
+        ACCOUNT_ID_PUBLIC_FUNGIBLE_FAUCET_2, ACCOUNT_ID_REGULAR_PRIVATE_ACCOUNT_UPDATABLE_CODE,
         ACCOUNT_ID_REGULAR_PUBLIC_ACCOUNT_IMMUTABLE_CODE,
         ACCOUNT_ID_REGULAR_PUBLIC_ACCOUNT_UPDATABLE_CODE,
     },
@@ -128,7 +131,7 @@ async fn insert_new_wallet(
     let (account, seed) = AccountBuilder::new(init_seed)
         .account_type(AccountType::RegularAccountImmutableCode)
         .storage_mode(storage_mode)
-        .with_component(RpoFalcon512::new(pub_key))
+        .with_auth_component(RpoFalcon512::new(pub_key))
         .with_component(BasicWallet)
         .build()
         .unwrap();
@@ -159,7 +162,7 @@ async fn insert_new_fungible_faucet(
     let (account, seed) = AccountBuilder::new(init_seed)
         .account_type(AccountType::FungibleFaucet)
         .storage_mode(storage_mode)
-        .with_component(RpoFalcon512::new(pub_key))
+        .with_auth_component(RpoFalcon512::new(pub_key))
         .with_component(BasicFungibleFaucet::new(symbol, 10, max_supply).unwrap())
         .build()
         .unwrap();
@@ -308,6 +311,7 @@ async fn insert_same_account_twice_fails() {
     let account = Account::mock(
         ACCOUNT_ID_PUBLIC_FUNGIBLE_FAUCET_2,
         Felt::new(2),
+        RpoFalcon512::new(PublicKey::new(EMPTY_WORD)),
         TransactionKernel::testing_assembler(),
     );
 
@@ -323,6 +327,7 @@ async fn account_code() {
     let account = Account::mock(
         ACCOUNT_ID_REGULAR_PRIVATE_ACCOUNT_UPDATABLE_CODE,
         Felt::ZERO,
+        RpoFalcon512::new(PublicKey::new(EMPTY_WORD)),
         TransactionKernel::testing_assembler(),
     );
 
@@ -346,6 +351,7 @@ async fn get_account_by_id() {
     let account = Account::mock(
         ACCOUNT_ID_REGULAR_PUBLIC_ACCOUNT_UPDATABLE_CODE,
         Felt::new(10),
+        RpoFalcon512::new(PublicKey::new(EMPTY_WORD)),
         TransactionKernel::assembler(),
     );
 
@@ -574,7 +580,7 @@ async fn mint_transaction() {
 
     let transaction = client.new_transaction(faucet.id(), transaction_request).await.unwrap();
 
-    assert!(transaction.executed_transaction().account_delta().nonce().is_some());
+    assert_eq!(transaction.executed_transaction().account_delta().nonce_increment(), ONE);
 }
 
 #[tokio::test]
@@ -806,7 +812,7 @@ async fn execute_program() {
         end
         ";
 
-    let tx_script = client.compile_tx_script(vec![], code).unwrap();
+    let tx_script = client.compile_tx_script(code).unwrap();
 
     let output_stack = client
         .execute_program(wallet.id(), tx_script, AdviceInputs::default(), BTreeSet::new())
@@ -1563,4 +1569,38 @@ async fn subsequent_discarded_transactions() {
         account_after_sync.account().commitment(),
         account_before_tx.account().commitment(),
     );
+}
+
+#[tokio::test]
+async fn missing_recipient_digest() {
+    let (mut client, _, keystore) = create_test_client().await;
+
+    let (faucet, _seed) =
+        insert_new_fungible_faucet(&mut client, AccountStorageMode::Private, &keystore)
+            .await
+            .unwrap();
+
+    let dummy_recipient = NoteRecipient::new(
+        Word::default(),
+        WellKnownNote::SWAP.script(),
+        NoteInputs::new(vec![]).unwrap(),
+    );
+
+    let dummy_recipient_digest = dummy_recipient.digest();
+
+    let tx_request = TransactionRequestBuilder::new()
+        .with_expected_output_recipients(vec![dummy_recipient])
+        .build_mint_fungible_asset(
+            FungibleAsset::new(faucet.id(), 5u64).unwrap(),
+            AccountId::try_from(ACCOUNT_ID_PRIVATE_SENDER).unwrap(),
+            NoteType::Public,
+            client.rng(),
+        )
+        .unwrap();
+
+    let error = client.new_transaction(faucet.id(), tx_request).await.unwrap_err();
+
+    if let ClientError::MissingOutputRecipients(digests) = error {
+        assert!(digests == vec![dummy_recipient_digest]);
+    }
 }

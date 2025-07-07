@@ -37,7 +37,7 @@ async fn client_builder_initializes_client_with_endpoint() -> Result<(), ClientE
         .build()
         .await?;
 
-    assert!(client.is_in_debug_mode());
+    assert!(client.in_debug_mode());
 
     let sync_summary = client.sync_state().await.expect("Sync state failed");
 
@@ -1163,7 +1163,7 @@ async fn unused_rpc_api() {
         .await
         .unwrap();
 
-    assert_eq!(account_delta.nonce(), Some(ONE));
+    assert_eq!(account_delta.nonce_increment(), ONE);
     assert_eq!(*account_delta.vault().fungible().iter().next().unwrap().1, MINT_AMOUNT as i64);
 }
 

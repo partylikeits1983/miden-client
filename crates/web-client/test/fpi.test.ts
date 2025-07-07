@@ -45,7 +45,7 @@ export const testStandardFpi = async (): Promise<void> => {
     let authComponent = window.AccountComponent.createAuthComponent(secretKey);
 
     let getItemAccountBuilderResult = new window.AccountBuilder(walletSeed)
-      .withComponent(authComponent)
+      .withAuthComponent(authComponent)
       .withComponent(getItemComponent)
       .storageMode(window.AccountStorageMode.public())
       .build();
@@ -69,10 +69,9 @@ export const testStandardFpi = async (): Promise<void> => {
     let deploymentTxScript = window.TransactionScript.compile(
       `
                 begin 
-                    call.::miden::contracts::auth::basic::auth_tx_rpo_falcon512 
+                    call.::miden::contracts::auth::basic::auth__tx_rpo_falcon512 
                 end
             `,
-      new window.TransactionScriptInputPairArray(),
       window.TransactionKernel.assembler()
     );
 
@@ -110,7 +109,7 @@ export const testStandardFpi = async (): Promise<void> => {
                 exec.tx::execute_foreign_procedure
                 push.9.12.18.30 assert_eqw
         
-                call.::miden::contracts::auth::basic::auth_tx_rpo_falcon512 
+                call.::miden::contracts::auth::basic::auth__tx_rpo_falcon512 
             end
         `;
     txScript = txScript
@@ -123,7 +122,6 @@ export const testStandardFpi = async (): Promise<void> => {
 
     let compiledTxScript = window.TransactionScript.compile(
       txScript,
-      new window.TransactionScriptInputPairArray(),
       window.TransactionKernel.assembler()
     );
 
