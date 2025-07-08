@@ -11,6 +11,7 @@
 * [BREAKING] Removed `TransactionExecutor` from `Client` and `NoteScreener` (#998).
 * [BREAKING] Renamed P2IDR to P2IDE (#1016).
 * Replaced deprecated #[clap(...)] with #[command(...)] and #[arg(...)] (#897).
+* [BREAKING] Removed `with_` prefix from builder functions (#1018).
 
 ### Features
 
