@@ -74,7 +74,7 @@ async fn transaction_request() {
     // these exact arguments
     let note_args_commitment = Rpo256::hash_elements(&NOTE_ARGS);
 
-    let note_args_map = vec![(note.id(), Some(note_args_commitment.into()))];
+    let note_args_map = vec![(note.clone(), Some(note_args_commitment.into()))];
     let mut advice_map = AdviceMap::default();
     advice_map.insert(note_args_commitment, NOTE_ARGS.to_vec());
 
@@ -94,7 +94,7 @@ async fn transaction_request() {
 
     // FAILURE ATTEMPT
     let transaction_request = TransactionRequestBuilder::new()
-        .authenticated_input_notes(note_args_map.clone())
+        .unauthenticated_input_notes(note_args_map.clone())
         .custom_script(tx_script.clone())
         .script_arg([ZERO, ZERO, ZERO, ZERO])
         .extend_advice_map(advice_map.clone())
@@ -106,7 +106,7 @@ async fn transaction_request() {
 
     // SUCCESS EXECUTION
     let transaction_request = TransactionRequestBuilder::new()
-        .authenticated_input_notes(note_args_map)
+        .unauthenticated_input_notes(note_args_map)
         .custom_script(tx_script)
         .script_arg([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)])
         .extend_advice_map(advice_map)
@@ -120,9 +120,25 @@ async fn transaction_request() {
     let deserialized_transaction_request = TransactionRequest::read_from_bytes(&buffer).unwrap();
     assert_eq!(transaction_request, deserialized_transaction_request);
 
-    execute_tx_and_sync(&mut client, regular_account.id(), transaction_request).await;
+    let transaction_execution_result =
+        client.new_transaction(regular_account.id(), transaction_request).await.unwrap();
 
-    client.sync_state().await.unwrap();
+    // Assert that the custom note was used in the transaction
+    assert!(
+        transaction_execution_result
+            .executed_transaction()
+            .input_notes()
+            .into_iter()
+            .any(|input_note| input_note.note().id() == note.id())
+    );
+
+    let tx_id = transaction_execution_result.executed_transaction().id();
+    client.submit_transaction(transaction_execution_result).await.unwrap();
+    wait_for_tx(&mut client, tx_id).await;
+
+    // Assert that the note was consumed on chain
+    let input_note = client.get_input_note(note.id()).await.unwrap().unwrap();
+    assert!(input_note.is_consumed());
 }
 
 #[tokio::test]
@@ -152,7 +168,7 @@ async fn merkle_store() {
     // these exact arguments
     let note_args_commitment = Rpo256::hash_elements(&NOTE_ARGS);
 
-    let note_args_map = vec![(note.id(), Some(note_args_commitment.into()))];
+    let note_args_map = vec![(note, Some(note_args_commitment.into()))];
     let mut advice_map = AdviceMap::new();
     advice_map.insert(note_args_commitment, NOTE_ARGS.to_vec());
 
@@ -204,7 +220,7 @@ async fn merkle_store() {
     let tx_script = client.compile_tx_script(&code).unwrap();
 
     let transaction_request = TransactionRequestBuilder::new()
-        .authenticated_input_notes(note_args_map)
+        .unauthenticated_input_notes(note_args_map)
         .custom_script(tx_script)
         .extend_advice_map(advice_map)
         .extend_merkle_store(merkle_store.inner_nodes())
