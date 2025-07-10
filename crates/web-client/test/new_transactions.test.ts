@@ -946,7 +946,8 @@ export const discardedTransaction =
         faucetAccount.id(),
         window.NoteType.Private,
         BigInt(100),
-        1
+        1,
+        null
       );
       let sendTransactionResult = await client.newTransaction(
         senderAccount.id(),
