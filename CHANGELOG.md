@@ -15,6 +15,7 @@
 * [BREAKING] Removed `with_` prefix from builder functions (#1018).
 * Changed sync to store notes regardless of consumption checks if it matched a tracked tag (#1031).
 * Added a way to instantiate a `ScriptBuilder` from `Client` (#1022).
+* [BREAKING] Removed `relevant_notes` from `TransactionResult` (#1030).
 
 ### Features
 
