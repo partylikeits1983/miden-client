@@ -4,6 +4,7 @@ use miden_client::{
     Client, ZERO,
     account::{Account, AccountId, AccountType, StorageSlot},
     asset::Asset,
+    rpc::{NodeRpcClient, TonicRpcClient},
 };
 use miden_objects::PrettyPrint;
 
@@ -23,20 +24,20 @@ use crate::{
 #[allow(clippy::option_option)]
 pub struct AccountCmd {
     /// List all accounts monitored by this client (default action).
-    #[clap(short, long, group = "action")]
+    #[arg(short, long, group = "action")]
     list: bool,
     /// Show details of the account for the specified ID or hex prefix.
-    #[clap(short, long, group = "action", value_name = "ID")]
+    #[arg(short, long, group = "action", value_name = "ID")]
     show: Option<String>,
     /// When using --show, include the account code in the output.
-    #[clap(long, requires = "show")]
+    #[arg(long, requires = "show")]
     with_code: bool,
     /// Manages default account for transaction execution.
     ///
     /// If no ID is provided it will display the current default account ID.
     /// If "none" is provided it will remove the default account else it will set the default
     /// account to the provided ID.
-    #[clap(short, long, group = "action", value_name = "ID")]
+    #[arg(short, long, group = "action", value_name = "ID")]
     default: Option<Option<String>>,
 }
 
@@ -133,11 +134,27 @@ pub async fn show_account(
     cli_config: &CliConfig,
     with_code: bool,
 ) -> Result<(), CliError> {
-    let account: Account = client
-        .get_account(account_id)
-        .await?
-        .ok_or(CliError::Input(format!("Account with ID {account_id} not found")))?
-        .into();
+    let account = if let Some(account) = client.get_account(account_id).await? {
+        account.into()
+    } else {
+        let bech32_id = account_id.to_bech32(cli_config.rpc.endpoint.0.to_network_id()?);
+        println!("Account {bech32_id} is not tracked by the client. Fetching from the network...",);
+
+        let rpc_client =
+            TonicRpcClient::new(&cli_config.rpc.endpoint.clone().into(), cli_config.rpc.timeout_ms);
+
+        let fetched_account = rpc_client.get_account_details(account_id).await.map_err(|_| {
+            CliError::Input(format!(
+                "Unable to fetch account {bech32_id} from the network. It may not exist.",
+            ))
+        })?;
+
+        let account: Option<Account> = fetched_account.into();
+
+        account.ok_or(CliError::Input(format!(
+            "Account {bech32_id} is private and not tracked by the client",
+        )))?
+    };
 
     print_summary_table(&account, cli_config)?;
 

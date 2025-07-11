@@ -6,6 +6,7 @@ import {
   mintTransaction,
   sendTransaction,
   setupWalletAndFaucet,
+  swapTransaction,
 } from "./webClientTestUtils";
 import { setupConsumedNote } from "./notes.test";
 import { Account, TransactionRecord } from "../dist/crates/miden_client_web";
@@ -267,6 +268,62 @@ describe("send transaction tests", () => {
   });
 });
 
+// SWAP_TRANSACTION TEST
+// =======================================================================================================
+
+describe("swap transaction tests", () => {
+  const testCases = [
+    { flag: false, description: "swap transaction completes successfully" },
+    {
+      flag: true,
+      description: "swap transaction with remote prover completes successfully",
+    },
+  ];
+
+  testCases.forEach(({ flag, description }) => {
+    it(description, async () => {
+      const { accountId: accountA, faucetId: faucetA } =
+        await setupWalletAndFaucet();
+      const { accountId: accountB, faucetId: faucetB } =
+        await setupWalletAndFaucet();
+
+      const assetAAmount = BigInt(1);
+      const assetBAmount = BigInt(25);
+
+      await mintAndConsumeTransaction(accountA, faucetA, flag);
+      await mintAndConsumeTransaction(accountB, faucetB, flag);
+
+      const { accountAAssets, accountBAssets } = await swapTransaction(
+        accountA,
+        accountB,
+        faucetA,
+        assetAAmount,
+        faucetB,
+        assetBAmount,
+        flag
+      );
+
+      // --- assertions for Account A ---
+      const aA = accountAAssets!.find((a) => a.assetId === faucetA);
+      expect(aA, `Expected to find asset ${faucetA} on Account A`).to.exist;
+      expect(BigInt(aA!.amount)).to.equal(999n);
+
+      const aB = accountAAssets!.find((a) => a.assetId === faucetB);
+      expect(aB, `Expected to find asset ${faucetB} on Account A`).to.exist;
+      expect(BigInt(aB!.amount)).to.equal(25n);
+
+      // --- assertions for Account B ---
+      const bA = accountBAssets!.find((a) => a.assetId === faucetA);
+      expect(bA, `Expected to find asset ${faucetA} on Account B`).to.exist;
+      expect(BigInt(bA!.amount)).to.equal(1n);
+
+      const bB = accountBAssets!.find((a) => a.assetId === faucetB);
+      expect(bB, `Expected to find asset ${faucetB} on Account B`).to.exist;
+      expect(BigInt(bB!.amount)).to.equal(975n);
+    });
+  });
+});
+
 // CUSTOM_TRANSACTIONS TESTS
 // =======================================================================================================
 
@@ -317,10 +374,7 @@ export const customTransaction = async (
       let noteMetadata = new window.NoteMetadata(
         faucetAccount.id(),
         window.NoteType.Private,
-        window.NoteTag.fromAccountId(
-          walletAccount.id(),
-          window.NoteExecutionMode.newLocal()
-        ),
+        window.NoteTag.fromAccountId(walletAccount.id()),
         window.NoteExecutionHint.none(),
         undefined
       );
@@ -509,26 +563,25 @@ export const customTransaction = async (
                 # => [0, ${_assertedValue}]
                 assert_eq
 
-                call.auth_tx::auth_tx_rpo_falcon512
+                call.auth_tx::auth__tx_rpo_falcon512
             end
         `;
 
       // Creating Second Custom Transaction Request to Consume Custom Note
       // with Invalid/Valid Transaction Script
       let transactionScript = await client.compileTxScript(txScript);
-      let noteId = note.id();
       let noteArgsCommitment = window.Rpo256.hashElements(feltArray); // gets consumed by NoteIdAndArgs
-      let noteIdAndArgs = new window.NoteIdAndArgs(
-        noteId,
+      let noteAndArgs = new window.NoteAndArgs(
+        note,
         noteArgsCommitment.toWord()
       );
-      let noteIdAndArgsArray = new window.NoteIdAndArgsArray([noteIdAndArgs]);
+      let noteAndArgsArray = new window.NoteAndArgsArray([noteAndArgs]);
       let adviceMap = new window.AdviceMap();
       let noteArgsCommitment2 = window.Rpo256.hashElements(feltArray);
       adviceMap.insert(noteArgsCommitment2, feltArray);
 
       let transactionRequest2 = new window.TransactionRequestBuilder()
-        .withAuthenticatedInputNotes(noteIdAndArgsArray)
+        .withUnauthenticatedInputNotes(noteAndArgsArray)
         .withCustomScript(transactionScript)
         .extendAdviceMap(adviceMap)
         .build();
@@ -588,10 +641,7 @@ const customTxWithMultipleNotes = async (
       let noteMetadata = new window.NoteMetadata(
         senderAccountId,
         window.NoteType.Public,
-        window.NoteTag.fromAccountId(
-          targetAccountId,
-          window.NoteExecutionMode.newLocal()
-        ),
+        window.NoteTag.fromAccountId(targetAccountId),
         window.NoteExecutionHint.none(),
         undefined
       );
@@ -714,10 +764,6 @@ export const customAccountComponent = async (): Promise<void> => {
 
             dropw dropw dropw dropw
             # => []
-
-            # Incrementing the nonce by 1
-            push.1 exec.account::incr_nonce
-            # => []
         end
 
         # Inputs: [KEY]
@@ -784,15 +830,17 @@ export const customAccountComponent = async (): Promise<void> => {
     const walletSeed = new Uint8Array(32);
     crypto.getRandomValues(walletSeed);
 
-    let anchorBlock = await client.getLatestEpochBlock();
+    let secretKey = window.SecretKey.withRng(walletSeed);
+    let authComponent = window.AccountComponent.createAuthComponent(secretKey);
 
     let accountBuilderResult = new window.AccountBuilder(walletSeed)
-      .anchor(anchorBlock)
       .accountType(window.AccountType.RegularAccountImmutableCode)
       .storageMode(window.AccountStorageMode.public())
+      .withAuthComponent(authComponent)
       .withComponent(mappingAccountComponent)
       .build();
 
+    await client.addAccountSecretKeyToWebStore(secretKey);
     await client.newAccount(
       accountBuilderResult.account,
       accountBuilderResult.seed,
@@ -808,11 +856,8 @@ export const customAccountComponent = async (): Promise<void> => {
         accountCode
       );
 
-    const inputs = new window.TransactionScriptInputPairArray();
-
     let txScript = window.TransactionScript.compile(
       scriptCode,
-      inputs,
       assembler.withLibrary(accountComponentLib)
     );
 
@@ -900,7 +945,8 @@ export const discardedTransaction =
         faucetAccount.id(),
         window.NoteType.Private,
         BigInt(100),
-        1
+        1,
+        null
       );
       let sendTransactionResult = await client.newTransaction(
         senderAccount.id(),
@@ -1044,8 +1090,6 @@ export const counterAccountComponent = async (): Promise<
             # [index, count+1]
             exec.account::set_item
             # => []
-            push.1 exec.account::incr_nonce
-            # => []
             exec.sys::truncate_stack
             # => []
         end
@@ -1056,6 +1100,10 @@ export const counterAccountComponent = async (): Promise<
             call.counter_contract::increment_count
         end
       `;
+    const incrNonceAuthCode = `use.miden::account
+        export.auth__basic
+          push.1 exec.account::incr_nonce
+        end`;
     const client = window.client;
 
     // Create counter account
@@ -1071,11 +1119,15 @@ export const counterAccountComponent = async (): Promise<
     const walletSeed = new Uint8Array(32);
     crypto.getRandomValues(walletSeed);
 
-    let anchorBlock = await client.getLatestEpochBlock();
+    let incrNonceAuth = window.AccountComponent.compile(
+      incrNonceAuthCode,
+      assembler,
+      []
+    ).withSupportsAllTypes();
 
     let accountBuilderResult = new window.AccountBuilder(walletSeed)
-      .anchor(anchorBlock)
       .storageMode(window.AccountStorageMode.network())
+      .withAuthComponent(incrNonceAuth)
       .withComponent(counterAccountComponent)
       .build();
 
@@ -1100,11 +1152,8 @@ export const counterAccountComponent = async (): Promise<
         accountCode
       );
 
-    const inputs = new window.TransactionScriptInputPairArray();
-
     let txScript = window.TransactionScript.compile(
       scriptCode,
-      inputs,
       assembler.withLibrary(accountComponentLib)
     );
 
@@ -1130,8 +1179,11 @@ export const counterAccountComponent = async (): Promise<
 
     let noteInputs = new window.NoteInputs(new window.FeltArray([]));
 
+    const randomInts = Array.from({ length: 4 }, () =>
+      Math.floor(Math.random() * 100000)
+    );
     let serialNum = window.Word.newFromU64s(
-      new BigUint64Array([BigInt(1), BigInt(2), BigInt(3), BigInt(4)])
+      new BigUint64Array(randomInts.map(BigInt))
     );
     let noteRecipient = new window.NoteRecipient(
       serialNum,
@@ -1144,10 +1196,7 @@ export const counterAccountComponent = async (): Promise<
     let noteMetadata = new window.NoteMetadata(
       nativeAccount.id(),
       window.NoteType.Public,
-      window.NoteTag.fromAccountId(
-        accountBuilderResult.account.id(),
-        window.NoteExecutionMode.newNetwork()
-      ),
+      window.NoteTag.fromAccountId(accountBuilderResult.account.id()),
       window.NoteExecutionHint.none(),
       undefined
     );
@@ -1171,9 +1220,7 @@ export const counterAccountComponent = async (): Promise<
     );
 
     // Wait for network account to update
-    await client.syncState();
-    await new Promise((resolve) => setTimeout(resolve, 30000));
-    await client.syncState();
+    await window.helpers.waitForBlocks(2);
 
     let account = await client.getAccount(accountBuilderResult.account.id());
     let counter = account?.storage().getItem(0)?.toHex();

@@ -1,5 +1,4 @@
 use miden_client::{
-    Client,
     account::{Account, AccountBuilder, AccountType},
     crypto::SecretKey,
 };
@@ -14,16 +13,12 @@ use crate::{js_error_with_context, models::account_storage_mode::AccountStorageM
 // ================================================================================================
 // These methods should not be exposed to the wasm interface
 
-/// Serves as a way to manage the logic of seed generation and retrieval of the anchor block
-/// for creating a wallet account
-///
-/// We currently use the genesis block as the anchor block to ensure deterministic outcomes
+/// Serves as a way to manage the logic of seed generation.
 ///
 /// # Errors:
 /// - If rust client calls fail
 /// - If the seed is passed in and is not exactly 32 bytes
 pub(crate) async fn generate_wallet(
-    client: &mut Client,
     storage_mode: &AccountStorageMode,
     mutable: bool,
     seed: Option<Vec<u8>>,
@@ -47,20 +42,10 @@ pub(crate) async fn generate_wallet(
     let mut init_seed = [0u8; 32];
     rng.fill_bytes(&mut init_seed);
 
-    let anchor_block = client
-        .get_latest_epoch_block()
-        .await
-        .map_err(|err| js_error_with_context(err, "failed to get latest epoch block"))?;
-
     let (new_account, account_seed) = AccountBuilder::new(init_seed)
-        .anchor(
-            (&anchor_block)
-                .try_into()
-                .map_err(|err| js_error_with_context(err, "failed to convert anchor block"))?,
-        )
         .account_type(account_type)
         .storage_mode(storage_mode.into())
-        .with_component(RpoFalcon512::new(key_pair.public_key()))
+        .with_auth_component(RpoFalcon512::new(key_pair.public_key()))
         .with_component(BasicWallet)
         .build()
         .map_err(|err| js_error_with_context(err, "failed to create new wallet"))?;

@@ -53,7 +53,7 @@ pub const ACCOUNT_ID_REGULAR: u128 = ACCOUNT_ID_REGULAR_PRIVATE_ACCOUNT_UPDATABL
 
 pub const TEST_CLIENT_RPC_CONFIG_FILE: &str = include_str!("./config/miden-client-rpc.toml");
 
-/// Constant that represents the number of blocks until the p2idr can be recalled. If this value is
+/// Constant that represents the number of blocks until the p2ide can be recalled. If this value is
 /// too low, some tests might fail due to expected recall failures not happening.
 pub const RECALL_HEIGHT_DELTA: u32 = 50;
 
@@ -82,12 +82,12 @@ pub async fn create_test_client_builder() -> (ClientBuilder, TestClientKeyStore)
     let keystore = FilesystemKeyStore::new(auth_path.clone()).unwrap();
 
     let builder = ClientBuilder::new()
-        .with_rpc(Arc::new(TonicRpcClient::new(&rpc_endpoint, rpc_timeout)))
-        .with_rng(Box::new(rng))
-        .with_store(store)
-        .with_filesystem_keystore(auth_path.to_str().unwrap())
+        .rpc(Arc::new(TonicRpcClient::new(&rpc_endpoint, rpc_timeout)))
+        .rng(Box::new(rng))
+        .store(store)
+        .filesystem_keystore(auth_path.to_str().unwrap())
         .in_debug_mode(true)
-        .with_tx_graceful_blocks(None);
+        .tx_graceful_blocks(None);
 
     (builder, keystore)
 }
@@ -165,13 +165,10 @@ pub async fn insert_new_wallet_with_seed(
 
     keystore.add_key(&AuthSecretKey::RpoFalcon512(key_pair.clone())).unwrap();
 
-    let anchor_block = client.get_latest_epoch_block().await.unwrap();
-
     let (account, seed) = AccountBuilder::new(init_seed)
-        .anchor((&anchor_block).try_into().unwrap())
         .account_type(AccountType::RegularAccountImmutableCode)
         .storage_mode(storage_mode)
-        .with_component(RpoFalcon512::new(pub_key))
+        .with_auth_component(RpoFalcon512::new(pub_key))
         .with_component(BasicWallet)
         .build()
         .unwrap();
@@ -200,13 +197,10 @@ pub async fn insert_new_fungible_faucet(
     let max_supply = Felt::try_from(9_999_999_u64.to_le_bytes().as_slice())
         .expect("u64 can be safely converted to a field element");
 
-    let anchor_block = client.get_latest_epoch_block().await.unwrap();
-
     let (account, seed) = AccountBuilder::new(init_seed)
-        .anchor((&anchor_block).try_into().unwrap())
         .account_type(AccountType::FungibleFaucet)
         .storage_mode(storage_mode)
-        .with_component(RpoFalcon512::new(pub_key))
+        .with_auth_component(RpoFalcon512::new(pub_key))
         .with_component(BasicFungibleFaucet::new(symbol, 10, max_supply).unwrap())
         .build()
         .unwrap();
@@ -361,7 +355,7 @@ pub async fn setup_two_wallets_and_faucet(
     accounts_storage_mode: AccountStorageMode,
     keystore: &TestClientKeyStore,
 ) -> (Account, Account, Account) {
-    // Enusre clean state
+    // Ensure clean state
     assert!(client.get_account_headers().await.unwrap().is_empty());
     assert!(client.get_transactions(TransactionFilter::All).await.unwrap().is_empty());
     assert!(client.get_input_notes(NoteFilter::All).await.unwrap().is_empty());
@@ -392,11 +386,6 @@ pub async fn setup_wallet_and_faucet(
     accounts_storage_mode: AccountStorageMode,
     keystore: &TestClientKeyStore,
 ) -> (Account, Account) {
-    // Enusre clean state
-    assert!(client.get_account_headers().await.unwrap().is_empty());
-    assert!(client.get_transactions(TransactionFilter::All).await.unwrap().is_empty());
-    assert!(client.get_input_notes(NoteFilter::All).await.unwrap().is_empty());
-
     let (faucet_account, ..) = insert_new_fungible_faucet(client, accounts_storage_mode, keystore)
         .await
         .unwrap();
@@ -425,7 +414,7 @@ pub async fn mint_note(
 
     // Check that note is committed and return it
     println!("Fetching Committed Notes...");
-    let note_id = tx_request.expected_output_notes().next().unwrap().id();
+    let note_id = tx_request.expected_output_own_notes().pop().unwrap().id();
     let note = client.get_input_note(note_id).await.unwrap().unwrap();
     note.try_into().unwrap()
 }
@@ -511,10 +500,10 @@ pub fn mint_multiple_fungible_asset(
         })
         .collect::<Vec<OutputNote>>();
 
-    TransactionRequestBuilder::new().with_own_output_notes(notes).build().unwrap()
+    TransactionRequestBuilder::new().own_output_notes(notes).build().unwrap()
 }
 
-/// Executes a transaction and consumes the resulting unauthenticated notes inmediately without
+/// Executes a transaction and consumes the resulting unauthenticated notes immediately without
 /// waiting for the first transaction to be committed.
 pub async fn execute_tx_and_consume_output_notes(
     tx_request: TransactionRequest,
@@ -523,22 +512,22 @@ pub async fn execute_tx_and_consume_output_notes(
     consumer: AccountId,
 ) {
     let output_notes = tx_request
-        .expected_output_notes()
-        .cloned()
+        .expected_output_own_notes()
+        .into_iter()
         .map(|note| (note, None::<NoteArgs>))
         .collect::<Vec<(Note, Option<NoteArgs>)>>();
 
     execute_tx(client, executor, tx_request).await;
 
     let tx_request = TransactionRequestBuilder::new()
-        .with_unauthenticated_input_notes(output_notes)
+        .unauthenticated_input_notes(output_notes)
         .build()
         .unwrap();
     let transaction_id = execute_tx(client, consumer, tx_request).await;
     wait_for_tx(client, transaction_id).await;
 }
 
-/// Mint assets for the target account and consume them inmediately without waiting for the first
+/// Mint assets for the target account and consume them immediately without waiting for the first
 /// transaction to be committed.
 pub async fn mint_and_consume(
     client: &mut TestClient,

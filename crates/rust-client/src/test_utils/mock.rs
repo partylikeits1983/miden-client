@@ -94,7 +94,7 @@ impl MockRpcApi {
             mock_chain.add_pending_nullifier(nullifier);
         }
 
-        mock_chain.prove_next_block();
+        mock_chain.prove_next_block().unwrap();
     }
 
     /// Returns the current MMR of the blockchain.
@@ -116,7 +116,7 @@ impl MockRpcApi {
     fn get_sync_state_request(
         &self,
         request_block_num: BlockNumber,
-        note_tags: &[NoteTag],
+        note_tags: &BTreeSet<NoteTag>,
     ) -> SyncStateResponse {
         // Determine the next block number to sync
         let next_block_num = self
@@ -173,7 +173,7 @@ impl MockRpcApi {
     fn get_notes_in_block(
         &self,
         block_num: BlockNumber,
-        note_tags: &[NoteTag],
+        note_tags: &BTreeSet<NoteTag>,
     ) -> Vec<NoteSyncRecord> {
         self.mock_chain
             .read()
@@ -215,7 +215,7 @@ impl NodeRpcClient for MockRpcApi {
     async fn sync_notes(
         &self,
         block_num: BlockNumber,
-        note_tags: &[NoteTag],
+        note_tags: &BTreeSet<NoteTag>,
     ) -> Result<NoteSyncInfo, RpcError> {
         let response = self.get_sync_state_request(block_num, note_tags);
 
@@ -246,7 +246,7 @@ impl NodeRpcClient for MockRpcApi {
         &self,
         block_num: BlockNumber,
         _account_ids: &[AccountId],
-        note_tags: &[NoteTag],
+        note_tags: &BTreeSet<NoteTag>,
     ) -> Result<StateSyncInfo, RpcError> {
         let response = self.get_sync_state_request(block_num, note_tags);
 

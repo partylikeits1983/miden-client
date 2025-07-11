@@ -9,7 +9,7 @@ use miden_client::{
     note::{BlockNumber, NoteType as MidenNoteType, build_swap_tag, get_input_note_with_id_prefix},
     store::NoteRecordError,
     transaction::{
-        InputNote, OutputNote, PaymentTransactionData, SwapTransactionData, TransactionRequest,
+        InputNote, OutputNote, PaymentNoteDescription, SwapTransactionData, TransactionRequest,
         TransactionRequestBuilder, TransactionResult,
     },
 };
@@ -43,21 +43,21 @@ impl From<&NoteType> for MidenNoteType {
 #[derive(Debug, Parser, Clone)]
 pub struct MintCmd {
     /// Target account ID or its hex prefix.
-    #[clap(short = 't', long = "target")]
+    #[arg(short = 't', long = "target")]
     target_account_id: String,
 
     /// Asset to be minted.
-    #[clap(short, long, help=format!("Asset to be minted.\n{SHARED_TOKEN_DOCUMENTATION}"))]
+    #[arg(short, long, help=format!("Asset to be minted.\n{SHARED_TOKEN_DOCUMENTATION}"))]
     asset: String,
 
-    #[clap(short, long, value_enum)]
+    #[arg(short, long, value_enum)]
     note_type: NoteType,
     /// Flag to submit the executed transaction without asking for confirmation.
-    #[clap(long, default_value_t = false)]
+    #[arg(long, default_value_t = false)]
     force: bool,
 
     /// Flag to delegate proving to the remote prover specified in the config file.
-    #[clap(long, default_value_t = false)]
+    #[arg(long, default_value_t = false)]
     delegate_proving: bool,
 }
 
@@ -97,30 +97,35 @@ impl MintCmd {
 pub struct SendCmd {
     /// Sender account ID or its hex prefix. If none is provided, the default account's ID is used
     /// instead.
-    #[clap(short = 's', long = "sender")]
+    #[arg(short = 's', long = "sender")]
     sender_account_id: Option<String>,
     /// Target account ID or its hex prefix.
-    #[clap(short = 't', long = "target")]
+    #[arg(short = 't', long = "target")]
     target_account_id: String,
 
     /// Asset to be sent.
-    #[clap(short, long, help=format!("Asset to be sent.\n{SHARED_TOKEN_DOCUMENTATION}"))]
+    #[arg(short, long, help=format!("Asset to be sent.\n{SHARED_TOKEN_DOCUMENTATION}"))]
     asset: String,
 
-    #[clap(short, long, value_enum)]
+    #[arg(short, long, value_enum)]
     note_type: NoteType,
     /// Flag to submit the executed transaction without asking for confirmation
-    #[clap(long, default_value_t = false)]
+    #[arg(long, default_value_t = false)]
     force: bool,
     /// Set the recall height for the transaction. If the note wasn't consumed by this height, the
     /// sender may consume it back.
     ///
     /// Setting this flag turns the transaction from a `PayToId` to a `PayToIdWithRecall`.
-    #[clap(short, long)]
+    #[arg(short, long)]
     recall_height: Option<u32>,
 
+    /// Set the timelock height for the transaction. The note will not be consumable until this
+    /// height is reached.
+    #[arg(short = 'i', long)]
+    timelock_height: Option<u32>,
+
     /// Flag to delegate proving to the remote prover specified in the config file
-    #[clap(long, default_value_t = false)]
+    #[arg(long, default_value_t = false)]
     delegate_proving: bool,
 }
 
@@ -137,19 +142,24 @@ impl SendCmd {
             get_input_acc_id_by_prefix_or_default(&client, self.sender_account_id.clone()).await?;
         let target_account_id = parse_account_id(&client, self.target_account_id.as_str()).await?;
 
-        let payment_transaction = PaymentTransactionData::new(
+        let mut payment_description = PaymentNoteDescription::new(
             vec![fungible_asset.into()],
             sender_account_id,
             target_account_id,
         );
 
+        if let Some(recall_height) = self.recall_height {
+            payment_description =
+                payment_description.with_reclaim_height(BlockNumber::from(recall_height));
+        }
+
+        if let Some(timelock_height) = self.timelock_height {
+            payment_description =
+                payment_description.with_timelock_height(BlockNumber::from(timelock_height));
+        }
+
         let transaction_request = TransactionRequestBuilder::new()
-            .build_pay_to_id(
-                payment_transaction,
-                self.recall_height.map(BlockNumber::from),
-                (&self.note_type).into(),
-                client.rng(),
-            )
+            .build_pay_to_id(payment_description, (&self.note_type).into(), client.rng())
             .map_err(|err| {
                 CliError::Transaction(err.into(), "Failed to build payment transaction".to_string())
             })?;
@@ -170,25 +180,25 @@ impl SendCmd {
 pub struct SwapCmd {
     /// Sender account ID or its hex prefix. If none is provided, the default account's ID is used
     /// instead.
-    #[clap(short = 's', long = "source")]
+    #[arg(short = 's', long = "source")]
     sender_account_id: Option<String>,
 
     /// Asset offered.
-    #[clap(long = "offered-asset", help=format!("Asset offered.\n{SHARED_TOKEN_DOCUMENTATION}"))]
+    #[arg(long = "offered-asset", help=format!("Asset offered.\n{SHARED_TOKEN_DOCUMENTATION}"))]
     offered_asset: String,
 
     /// Asset requested.
-    #[clap(short, long, help=format!("Asset requested.\n{SHARED_TOKEN_DOCUMENTATION}"))]
+    #[arg(short, long, help=format!("Asset requested.\n{SHARED_TOKEN_DOCUMENTATION}"))]
     requested_asset: String,
 
-    #[clap(short, long, value_enum)]
+    #[arg(short, long, value_enum)]
     note_type: NoteType,
     /// Flag to submit the executed transaction without asking for confirmation.
-    #[clap(long, default_value_t = false)]
+    #[arg(long, default_value_t = false)]
     force: bool,
 
     /// Flag to delegate proving to the remote prover specified in the config file.
-    #[clap(long, default_value_t = false)]
+    #[arg(long, default_value_t = false)]
     delegate_proving: bool,
 }
 
@@ -250,16 +260,16 @@ impl SwapCmd {
 pub struct ConsumeNotesCmd {
     /// The account ID to be used to consume the note or its hex prefix. If none is provided, the
     /// default account's ID is used instead.
-    #[clap(short = 'a', long = "account")]
+    #[arg(short = 'a', long = "account")]
     account_id: Option<String>,
     /// A list of note IDs or the hex prefixes of their corresponding IDs.
     list_of_notes: Vec<String>,
     /// Flag to submit the executed transaction without asking for confirmation.
-    #[clap(short, long, default_value_t = false)]
+    #[arg(short, long, default_value_t = false)]
     force: bool,
 
     /// Flag to delegate proving to the remote prover specified in the config file.
-    #[clap(long, default_value_t = false)]
+    #[arg(long, default_value_t = false)]
     delegate_proving: bool,
 }
 
@@ -308,8 +318,8 @@ impl ConsumeNotesCmd {
         }
 
         let transaction_request = TransactionRequestBuilder::new()
-            .with_authenticated_input_notes(authenticated_notes.into_iter().map(|id| (id, None)))
-            .with_unauthenticated_input_notes(unauthenticated_notes)
+            .authenticated_input_notes(authenticated_notes.into_iter().map(|id| (id, None)))
+            .unauthenticated_input_notes(unauthenticated_notes)
             .build()
             .map_err(|err| {
                 CliError::Transaction(
@@ -495,11 +505,7 @@ fn print_transaction_details(transaction_result: &TransactionResult) -> Result<(
         println!("{table}");
     }
 
-    if let Some(new_nonce) = account_delta.nonce() {
-        println!("New nonce: {new_nonce}.");
-    } else {
-        println!("No nonce changes.");
-    }
+    println!("Nonce incremented by: {}.", account_delta.nonce_delta());
 
     Ok(())
 }

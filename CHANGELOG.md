@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.10.0 (TBD)
+
+### Changes
+
+* [BREAKING] Renamed `miden-cli` crate to `miden-client-cli`, and the `miden` executable to `miden-client` (#960).
+* [BREAKING] Merged `concurrent` feature with `std` (#974).
+* [BREAKING] Changed `TransactionRequest` to use expected output recipients instead of output notes (#976).
+* Enforced input note order in `TransactionRequest` (#1001).
+* Added check for duplicate input notes in `TransactionRequest` (#1001).
+* [BREAKING] Removed `TransactionExecutor` from `Client` and `NoteScreener` (#998).
+* [BREAKING] Renamed P2IDR to P2IDE (#1016).
+* Replaced deprecated #[clap(...)] with #[command(...)] and #[arg(...)] (#897).
+* [BREAKING] Removed `with_` prefix from builder functions (#1018).
+* Changed sync to store notes regardless of consumption checks if it matched a tracked tag (#1031).
+* Added a way to instantiate a `ScriptBuilder` from `Client` (#1022).
+* [BREAKING] Removed `relevant_notes` from `TransactionResult` (#1030).
+
+### Features
+
+* Added support for FPI in Web Client (#958).
+* Exposed `bech32` account IDs in Web Client (#978).
+* Added transaction script argument support to `TransactionRequest` (#1017).
+* [BREAKING] Added support for timelock P2IDE notes (#1020).
+
+### Fixes
+
+* Fixed Intermittent Block Header Error During Sync in Web Client (#997).
+* Fixed Swap Transaction Request in Web Client (#1002)
+
 ## v0.9.4 (2025-07-02)
 
 * Support Operations From Counter Contract FPI Example in Web Client (#958).
@@ -56,6 +85,7 @@
 * [BREAKING] Added `DiscardCause` for transactions (#853).
 * Chained pending transactions get discarded when one of the transactions in the chain is discarded (#889).
 * [BREAKING] Renamed `NetworkNote` and `AccountDetails` to `FetchedNote` and `FetchedAccount` respectively (#931).
+* Fixed wasm-opt options to improve performance of generated wasm. wasm-opt settings were broken before.
 
 ## 0.8.2 (TBD)
 

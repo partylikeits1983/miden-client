@@ -13,6 +13,11 @@ use crate::{
     errors::CliError,
 };
 
+/// Contains the account component template file generated on build.rs, corresponding to the basic
+/// wallet component.
+const BASIC_WALLET_TEMPLATE_FILE: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/templates/", "basic-wallet.mct"));
+
 /// Contains the account component template file generated on build.rs, corresponding to the
 /// fungible faucet component.
 const FAUCET_TEMPLATE_FILE: &[u8] =
@@ -27,7 +32,7 @@ const BASIC_AUTH_TEMPLATE_FILE: &[u8] =
 // ================================================================================================
 
 #[derive(Debug, Clone, Parser)]
-#[clap(
+#[command(
     about = "Initialize the client. It will create a file named `miden-client.toml` that holds \
 the CLI and client configurations, and will be placed by default in the current working \
 directory"
@@ -39,14 +44,14 @@ pub struct InitCmd {
     network: Network,
 
     /// Path to the store file.
-    #[clap(long)]
+    #[arg(long)]
     store_path: Option<String>,
 
-    /// RPC endpoint for the proving service. Required if proving mode is set to remote.
+    /// RPC endpoint for the remote prover. Required if proving mode is set to remote.
     /// The endpoint must be in the form of "{protocol}://{hostname}:{port}", being the protocol
     /// and port optional.
     /// If the proving RPC isn't set, the proving mode will be set to local.
-    #[clap(long)]
+    #[arg(long)]
     remote_prover_endpoint: Option<String>,
 
     /// Maximum number of blocks the client can be behind the network.
@@ -114,6 +119,10 @@ fn write_template_files(cli_config: &CliConfig) -> Result<(), CliError> {
             "failed to create account component templates directory".into(),
         )
     })?;
+
+    let wallet_template_path = cli_config.component_template_directory.join("basic-wallet.mct");
+    let mut wallet_file = File::create(&wallet_template_path)?;
+    wallet_file.write_all(BASIC_WALLET_TEMPLATE_FILE)?;
 
     // Write the faucet template file.
     // TODO: io errors should probably have their own context.

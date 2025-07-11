@@ -4,13 +4,20 @@ use miden_objects::{
     Digest, Felt,
     block::BlockHeader,
     crypto::merkle::MerklePath,
-    note::{Note, NoteExecutionHint, NoteId, NoteInclusionProof, NoteMetadata, NoteTag, NoteType},
+    note::{Note, NoteDetails, NoteId, NoteInclusionProof, NoteMetadata, NoteTag, NoteType},
 };
+use miden_tx::utils::Deserializable;
 
 use super::{MissingFieldHelper, RpcConversionError};
 use crate::rpc::{
     RpcError,
-    generated::{note::NoteMetadata as ProtoNoteMetadata, responses::SyncNoteResponse},
+    generated::{
+        note::{
+            CommittedNote as ProtoCommittedNote, NoteInclusionInBlockProof as ProtoInclusionProof,
+            NoteMetadata as ProtoNoteMetadata,
+        },
+        responses::SyncNoteResponse,
+    },
 };
 
 impl TryFrom<ProtoNoteMetadata> for NoteMetadata {
@@ -23,10 +30,7 @@ impl TryFrom<ProtoNoteMetadata> for NoteMetadata {
             .try_into()?;
         let note_type = NoteType::try_from(u64::from(value.note_type))?;
         let tag = NoteTag::from(value.tag);
-        let execution_hint_tag = (value.execution_hint & 0xff) as u8;
-        let execution_hint_payload = ((value.execution_hint >> 8) & 0x00ff_ffff) as u32;
-        let execution_hint =
-            NoteExecutionHint::from_parts(execution_hint_tag, execution_hint_payload)?;
+        let execution_hint = value.execution_hint.try_into()?;
 
         let aux = Felt::try_from(value.aux).map_err(|_| RpcConversionError::NotAValidFelt)?;
 
@@ -46,6 +50,22 @@ impl From<NoteMetadata> for ProtoNoteMetadata {
     }
 }
 
+impl TryFrom<ProtoInclusionProof> for NoteInclusionProof {
+    type Error = RpcConversionError;
+
+    fn try_from(value: ProtoInclusionProof) -> Result<Self, Self::Error> {
+        Ok(NoteInclusionProof::new(
+            value.block_num.into(),
+            u16::try_from(value.note_index_in_block)
+                .map_err(|_| RpcConversionError::InvalidField("NoteIndexInBlock".into()))?,
+            value
+                .merkle_path
+                .ok_or_else(|| ProtoInclusionProof::missing_field("MerklePath"))?
+                .try_into()?,
+        )?)
+    }
+}
+
 // SYNC NOTE
 // ================================================================================================
 
@@ -60,7 +80,7 @@ pub struct NoteSyncInfo {
     ///
     /// More specifically, the full proof consists of `forest`, `position` and `path` components.
     /// This value constitutes the `path`. The other two components can be obtained as follows:
-    ///    - `position` is simply `resopnse.block_header.block_num`.
+    ///    - `position` is simply `response.block_header.block_num`.
     ///    - `forest` is the same as `response.chain_tip + 1`.
     pub mmr_path: MerklePath,
     /// List of all notes together with the Merkle paths from `response.block_header.note_root`.
@@ -201,6 +221,39 @@ impl FetchedNote {
         match self {
             FetchedNote::Private(id, ..) => *id,
             FetchedNote::Public(note, _) => note.id(),
+        }
+    }
+}
+
+impl TryFrom<ProtoCommittedNote> for FetchedNote {
+    type Error = RpcConversionError;
+
+    fn try_from(value: ProtoCommittedNote) -> Result<Self, Self::Error> {
+        let inclusion_proof = value
+            .inclusion_proof
+            .ok_or_else(|| ProtoCommittedNote::missing_field("InclusionProof"))?;
+
+        let note_id: Digest = inclusion_proof
+            .note_id
+            .ok_or_else(|| ProtoCommittedNote::missing_field("InclusionProof.NoteId"))?
+            .try_into()?;
+
+        let inclusion_proof = NoteInclusionProof::try_from(inclusion_proof)?;
+
+        let note = value.note.ok_or_else(|| ProtoCommittedNote::missing_field("Note"))?;
+
+        let metadata = note
+            .metadata
+            .ok_or_else(|| ProtoCommittedNote::missing_field("Note.Metadata"))?
+            .try_into()?;
+
+        if let Some(detail_bytes) = note.details {
+            let details = NoteDetails::read_from_bytes(&detail_bytes)?;
+            let (assets, recipient) = details.into_parts();
+
+            Ok(FetchedNote::Public(Note::new(assets, metadata, recipient), inclusion_proof))
+        } else {
+            Ok(FetchedNote::Private(NoteId::from(note_id), metadata, inclusion_proof))
         }
     }
 }

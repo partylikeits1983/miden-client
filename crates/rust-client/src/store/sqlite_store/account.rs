@@ -459,22 +459,25 @@ pub(crate) fn undo_account_state(
 
 #[cfg(test)]
 mod tests {
+    use miden_lib::account::auth::RpoFalcon512;
     use miden_objects::{
+        EMPTY_WORD,
         account::{AccountCode, AccountComponent},
+        crypto::dsa::rpo_falcon512::PublicKey,
         testing::account_component::BASIC_WALLET_CODE,
     };
 
     use crate::store::sqlite_store::{account::insert_account_code, tests::create_test_store};
 
     #[tokio::test]
-    async fn test_account_code_insertion_no_duplicates() {
+    async fn account_code_insertion_no_duplicates() {
         let store = create_test_store().await;
         let assembler = miden_lib::transaction::TransactionKernel::assembler();
         let account_component = AccountComponent::compile(BASIC_WALLET_CODE, assembler, vec![])
             .unwrap()
             .with_supports_all_types();
         let account_code = AccountCode::from_components(
-            &[account_component],
+            &[RpoFalcon512::new(PublicKey::new(EMPTY_WORD)).into(), account_component],
             miden_objects::account::AccountType::RegularAccountUpdatableCode,
         )
         .unwrap();

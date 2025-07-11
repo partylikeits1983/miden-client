@@ -15,10 +15,7 @@ use miden_objects::{
         merkle::{MerkleStore, MerkleTree, NodeIndex},
         rand::{FeltRng, RpoRandomCoin},
     },
-    note::{
-        Note, NoteAssets, NoteExecutionMode, NoteInputs, NoteMetadata, NoteRecipient, NoteTag,
-        NoteType,
-    },
+    note::{Note, NoteAssets, NoteInputs, NoteMetadata, NoteRecipient, NoteTag, NoteType},
     transaction::OutputNote,
     vm::AdviceMap,
 };
@@ -51,7 +48,7 @@ const NOTE_ARGS: [Felt; 8] = [
 ];
 
 #[tokio::test]
-async fn test_transaction_request() {
+async fn transaction_request() {
     let (mut client, authenticator) = create_test_client().await;
     wait_for_node(&mut client).await;
 
@@ -77,7 +74,7 @@ async fn test_transaction_request() {
     // these exact arguments
     let note_args_commitment = Rpo256::hash_elements(&NOTE_ARGS);
 
-    let note_args_map = vec![(note.id(), Some(note_args_commitment.into()))];
+    let note_args_map = vec![(note.clone(), Some(note_args_commitment.into()))];
     let mut advice_map = AdviceMap::default();
     advice_map.insert(note_args_commitment, NOTE_ARGS.to_vec());
 
@@ -85,38 +82,33 @@ async fn test_transaction_request() {
         use.miden::contracts::auth::basic->auth_tx
 
         begin
-            push.0 push.{asserted_value}
-            # => [0, {asserted_value}]
-            assert_eq
+            # We use the script argument to store the expected value to be compared
+            push.1.2.3.4
+            # => [[1,2,3,4], TX_SCRIPT_ARG]
+            assert_eqw
 
-            call.auth_tx::auth_tx_rpo_falcon512
+            call.auth_tx::auth__tx_rpo_falcon512
         end
         ";
+    let tx_script = client.script_builder().compile_tx_script(code).unwrap();
+
     // FAILURE ATTEMPT
-
-    let failure_code = code.replace("{asserted_value}", "1");
-
-    let tx_script = client.compile_tx_script(vec![], &failure_code).unwrap();
-
     let transaction_request = TransactionRequestBuilder::new()
-        .with_authenticated_input_notes(note_args_map.clone())
-        .with_custom_script(tx_script)
+        .unauthenticated_input_notes(note_args_map.clone())
+        .custom_script(tx_script.clone())
+        .script_arg([ZERO, ZERO, ZERO, ZERO])
         .extend_advice_map(advice_map.clone())
         .build()
         .unwrap();
 
-    // This fails becuase of {asserted_value} having the incorrect number passed in
+    // This fails because of {asserted_value} having the incorrect number passed in
     assert!(client.new_transaction(regular_account.id(), transaction_request).await.is_err());
 
     // SUCCESS EXECUTION
-
-    let success_code = code.replace("{asserted_value}", "0");
-
-    let tx_script = client.compile_tx_script(vec![], &success_code).unwrap();
-
     let transaction_request = TransactionRequestBuilder::new()
-        .with_authenticated_input_notes(note_args_map)
-        .with_custom_script(tx_script)
+        .unauthenticated_input_notes(note_args_map)
+        .custom_script(tx_script)
+        .script_arg([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)])
         .extend_advice_map(advice_map)
         .build()
         .unwrap();
@@ -128,13 +120,29 @@ async fn test_transaction_request() {
     let deserialized_transaction_request = TransactionRequest::read_from_bytes(&buffer).unwrap();
     assert_eq!(transaction_request, deserialized_transaction_request);
 
-    execute_tx_and_sync(&mut client, regular_account.id(), transaction_request).await;
+    let transaction_execution_result =
+        client.new_transaction(regular_account.id(), transaction_request).await.unwrap();
 
-    client.sync_state().await.unwrap();
+    // Assert that the custom note was used in the transaction
+    assert!(
+        transaction_execution_result
+            .executed_transaction()
+            .input_notes()
+            .into_iter()
+            .any(|input_note| input_note.note().id() == note.id())
+    );
+
+    let tx_id = transaction_execution_result.executed_transaction().id();
+    client.submit_transaction(transaction_execution_result).await.unwrap();
+    wait_for_tx(&mut client, tx_id).await;
+
+    // Assert that the note was consumed on chain
+    let input_note = client.get_input_note(note.id()).await.unwrap().unwrap();
+    assert!(input_note.is_consumed());
 }
 
 #[tokio::test]
-async fn test_merkle_store() {
+async fn merkle_store() {
     let (mut client, authenticator) = create_test_client().await;
     wait_for_node(&mut client).await;
 
@@ -160,7 +168,7 @@ async fn test_merkle_store() {
     // these exact arguments
     let note_args_commitment = Rpo256::hash_elements(&NOTE_ARGS);
 
-    let note_args_map = vec![(note.id(), Some(note_args_commitment.into()))];
+    let note_args_map = vec![(note, Some(note_args_commitment.into()))];
     let mut advice_map = AdviceMap::new();
     advice_map.insert(note_args_commitment, NOTE_ARGS.to_vec());
 
@@ -206,14 +214,14 @@ async fn test_merkle_store() {
         .as_str();
     }
 
-    code += "call.auth_tx::auth_tx_rpo_falcon512 end";
+    code += "call.auth_tx::auth__tx_rpo_falcon512 end";
 
     // Build the transaction
-    let tx_script = client.compile_tx_script(vec![], &code).unwrap();
+    let tx_script = client.script_builder().compile_tx_script(&code).unwrap();
 
     let transaction_request = TransactionRequestBuilder::new()
-        .with_authenticated_input_notes(note_args_map)
-        .with_custom_script(tx_script)
+        .unauthenticated_input_notes(note_args_map)
+        .custom_script(tx_script)
         .extend_advice_map(advice_map)
         .extend_merkle_store(merkle_store.inner_nodes())
         .build()
@@ -225,7 +233,7 @@ async fn test_merkle_store() {
 }
 
 #[tokio::test]
-async fn test_onchain_notes_sync_with_tag() {
+async fn onchain_notes_sync_with_tag() {
     // Client 1 has an private faucet which will mint an onchain note for client 2
     let (mut client_1, keystore_1) = create_test_client().await;
     // Client 2 will be used to sync and check that by adding the tag we can still fetch notes
@@ -257,13 +265,13 @@ async fn test_onchain_notes_sync_with_tag() {
                 assert_eq
             end
             ";
-    let note_script = client_1.compile_note_script(note_script).unwrap();
+    let note_script = client_1.script_builder().compile_note_script(note_script).unwrap();
     let inputs = NoteInputs::new(vec![]).unwrap();
     let serial_num = client_1.rng().draw_word();
     let note_metadata = NoteMetadata::new(
         basic_account_1.id(),
         NoteType::Public,
-        NoteTag::from_account_id(basic_account_1.id(), NoteExecutionMode::Local).unwrap(),
+        NoteTag::from_account_id(basic_account_1.id()),
         NoteExecutionHint::None,
         Default::default(),
     )
@@ -274,18 +282,16 @@ async fn test_onchain_notes_sync_with_tag() {
 
     // Send transaction and wait for it to be committed
     let tx_request = TransactionRequestBuilder::new()
-        .with_own_output_notes(vec![OutputNote::Full(note.clone())])
+        .own_output_notes(vec![OutputNote::Full(note.clone())])
         .build()
         .unwrap();
 
-    let note = tx_request.expected_output_notes().next().unwrap().clone();
+    let note = tx_request.expected_output_own_notes().pop().unwrap().clone();
     execute_tx_and_sync(&mut client_1, basic_account_1.id(), tx_request).await;
 
     // Load tag into client 2
     client_2
-        .add_note_tag(
-            NoteTag::from_account_id(basic_account_1.id(), NoteExecutionMode::Local).unwrap(),
-        )
+        .add_note_tag(NoteTag::from_account_id(basic_account_1.id()))
         .await
         .unwrap();
 
@@ -311,7 +317,7 @@ async fn mint_custom_note(
     let note = create_custom_note(client, faucet_account_id, target_account_id, &mut random_coin);
 
     let transaction_request = TransactionRequestBuilder::new()
-        .with_own_output_notes(vec![OutputNote::Full(note.clone())])
+        .own_output_notes(vec![OutputNote::Full(note.clone())])
         .build()
         .unwrap();
 
@@ -334,7 +340,7 @@ fn create_custom_note(
         .replace("{expected_note_arg_2}", &expected_note_args[4..=7].join("."))
         .replace("{mem_address}", &mem_addr.to_string())
         .replace("{mem_address_2}", &(mem_addr + 4).to_string());
-    let note_script = client.compile_note_script(&note_script).unwrap();
+    let note_script = client.script_builder().compile_note_script(&note_script).unwrap();
 
     let inputs =
         NoteInputs::new(vec![target_account_id.prefix().as_felt(), target_account_id.suffix()])
@@ -343,7 +349,7 @@ fn create_custom_note(
     let note_metadata = NoteMetadata::new(
         faucet_account_id,
         NoteType::Private,
-        NoteTag::from_account_id(target_account_id, NoteExecutionMode::Local).unwrap(),
+        NoteTag::from_account_id(target_account_id),
         NoteExecutionHint::None,
         Default::default(),
     )

@@ -1,5 +1,5 @@
 import { expect } from "chai";
-import { TransactionProver } from "../dist";
+import { TransactionProver, WebClient } from "../dist";
 import { testingPage } from "./mocha.global.setup.mjs";
 
 interface MintTransactionResult {
@@ -59,7 +59,7 @@ export const mintTransaction = async (
       return {
         transactionId: mintTransactionResult.executedTransaction().id().toHex(),
         numOutputNotesCreated: mintTransactionResult.createdNotes().numNotes(),
-        nonce: mintTransactionResult.accountDelta().nonce()?.toString(),
+        nonce: mintTransactionResult.accountDelta().nonceDelta().toString(),
         createdNoteId: mintTransactionResult
           .createdNotes()
           .notes()[0]
@@ -161,7 +161,8 @@ export const sendTransaction = async (
         faucetAccountId,
         window.NoteType.Public,
         BigInt(100),
-        _recallHeight
+        _recallHeight,
+        null
       );
       let sendTransactionResult = await client.newTransaction(
         senderAccountId,
@@ -190,6 +191,160 @@ export const sendTransaction = async (
     targetAccountId,
     faucetAccountId,
     recallHeight,
+    withRemoteProver
+  );
+};
+
+export interface SwapTransactionResult {
+  accountAAssets: { assetId: string; amount: string }[] | undefined;
+  accountBAssets: { assetId: string; amount: string }[] | undefined;
+}
+
+export const swapTransaction = async (
+  accountAId: string,
+  accountBId: string,
+  assetAFaucetId: string,
+  assetAAmount: bigint,
+  assetBFaucetId: string,
+  assetBAmount: bigint,
+  withRemoteProver: boolean = false
+): Promise<SwapTransactionResult> => {
+  return await testingPage.evaluate(
+    async (
+      _accountAId,
+      _accountBId,
+      _assetAFaucetId,
+      _assetAAmount,
+      _assetBFaucetId,
+      _assetBAmount,
+      _withRemoteProver
+    ) => {
+      const client = window.client;
+
+      await client.syncState();
+
+      const accountAId = window.AccountId.fromHex(_accountAId);
+      const accountBId = window.AccountId.fromHex(_accountBId);
+      const assetAFaucetId = window.AccountId.fromHex(_assetAFaucetId);
+      const assetBFaucetId = window.AccountId.fromHex(_assetBFaucetId);
+
+      // Swap transaction
+
+      let swapTransactionRequest = client.newSwapTransactionRequest(
+        accountAId,
+        assetAFaucetId,
+        _assetAAmount,
+        assetBFaucetId,
+        _assetBAmount,
+        window.NoteType.Private
+      );
+
+      let expectedOutputNotes = swapTransactionRequest.expectedOutputOwnNotes();
+      let expectedPaybackNoteDetails = swapTransactionRequest
+        .expectedFutureNotes()
+        .map((futureNote) => futureNote.noteDetails);
+
+      let swapTransactionResult = await client.newTransaction(
+        accountAId,
+        swapTransactionRequest
+      );
+
+      if (_withRemoteProver && window.remoteProverUrl != null) {
+        await client.submitTransaction(
+          swapTransactionResult,
+          window.remoteProverInstance
+        );
+      } else {
+        await client.submitTransaction(swapTransactionResult);
+      }
+
+      await window.helpers.waitForTransaction(
+        swapTransactionResult.executedTransaction().id().toHex()
+      );
+
+      // Consuming swap note for account B
+
+      let txRequest1 = client.newConsumeTransactionRequest([
+        expectedOutputNotes[0].id().toString(),
+      ]);
+
+      let consumeTransaction1Result = await client.newTransaction(
+        accountBId,
+        txRequest1
+      );
+
+      if (_withRemoteProver && window.remoteProverUrl != null) {
+        await client.submitTransaction(
+          consumeTransaction1Result,
+          window.remoteProverInstance
+        );
+      } else {
+        await client.submitTransaction(consumeTransaction1Result);
+      }
+
+      await window.helpers.waitForTransaction(
+        consumeTransaction1Result.executedTransaction().id().toHex()
+      );
+
+      // Consuming payback note for account A
+
+      let txRequest2 = client.newConsumeTransactionRequest([
+        expectedPaybackNoteDetails[0].id().toString(),
+      ]);
+
+      let consumeTransaction2Result = await client.newTransaction(
+        accountAId,
+        txRequest2
+      );
+
+      if (_withRemoteProver && window.remoteProverUrl != null) {
+        await client.submitTransaction(
+          consumeTransaction2Result,
+          window.remoteProverInstance
+        );
+      } else {
+        await client.submitTransaction(consumeTransaction2Result);
+      }
+
+      await window.helpers.waitForTransaction(
+        consumeTransaction2Result.executedTransaction().id().toHex()
+      );
+
+      // Fetching assets from both accounts after the swap
+
+      let accountA = await client.getAccount(accountAId);
+      let accountAAssets = accountA
+        ?.vault()
+        .fungibleAssets()
+        .map((asset) => {
+          return {
+            assetId: asset.faucetId().toString(),
+            amount: asset.amount().toString(),
+          };
+        });
+
+      let accountB = await client.getAccount(accountBId);
+      let accountBAssets = accountB
+        ?.vault()
+        .fungibleAssets()
+        .map((asset) => {
+          return {
+            assetId: asset.faucetId().toString(),
+            amount: asset.amount().toString(),
+          };
+        });
+
+      return {
+        accountAAssets,
+        accountBAssets,
+      };
+    },
+    accountAId,
+    accountBId,
+    assetAFaucetId,
+    assetAAmount,
+    assetBFaucetId,
+    assetBAmount,
     withRemoteProver
   );
 };
@@ -399,7 +554,7 @@ export const consumeTransaction = async (
           .executedTransaction()
           .id()
           .toHex(),
-        nonce: consumeTransactionResult.accountDelta().nonce()?.toString(),
+        nonce: consumeTransactionResult.accountDelta().nonceDelta().toString(),
         numConsumedNotes: consumeTransactionResult.consumedNotes().numNotes(),
         targetAccountBalanace: changedTargetAccount
           .vault()
@@ -436,7 +591,7 @@ export const mintAndConsumeTransaction = async (
 
       let mintTransactionRequest = await client.newMintTransactionRequest(
         targetAccountId,
-        window.AccountId.fromHex(_faucetAccountId),
+        faucetAccountId,
         window.NoteType.Private,
         BigInt(1000)
       );
@@ -502,7 +657,7 @@ export const mintAndConsumeTransaction = async (
           numOutputNotesCreated: mintTransactionResult
             .createdNotes()
             .numNotes(),
-          nonce: mintTransactionResult.accountDelta().nonce()?.toString(),
+          nonce: mintTransactionResult.accountDelta().nonceDelta().toString(),
           createdNoteId: mintTransactionResult
             .createdNotes()
             .notes()[0]
@@ -514,7 +669,10 @@ export const mintAndConsumeTransaction = async (
             .executedTransaction()
             .id()
             .toHex(),
-          nonce: consumeTransactionResult.accountDelta().nonce()?.toString(),
+          nonce: consumeTransactionResult
+            .accountDelta()
+            .nonceDelta()
+            .toString(),
           numConsumedNotes: consumeTransactionResult.consumedNotes().numNotes(),
           targetAccountBalanace: changedTargetAccount
             .vault()

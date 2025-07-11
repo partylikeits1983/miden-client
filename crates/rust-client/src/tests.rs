@@ -8,27 +8,27 @@ use miden_lib::{
         auth::RpoFalcon512, faucets::BasicFungibleFaucet, interface::AccountInterfaceError,
         wallets::BasicWallet,
     },
-    note::utils,
+    note::{utils, well_known_note::WellKnownNote},
     transaction::TransactionKernel,
 };
 use miden_objects::{
-    Felt, FieldElement, Word, ZERO,
+    EMPTY_WORD, Felt, FieldElement, ONE, Word, ZERO,
     account::{
         Account, AccountBuilder, AccountCode, AccountHeader, AccountId, AccountStorageMode,
         AccountType, AuthSecretKey,
     },
     asset::{Asset, FungibleAsset, TokenSymbol},
     crypto::{
-        dsa::rpo_falcon512::SecretKey,
+        dsa::rpo_falcon512::{PublicKey, SecretKey},
         rand::{FeltRng, RpoRandomCoin},
     },
     note::{
-        Note, NoteAssets, NoteExecutionHint, NoteExecutionMode, NoteFile, NoteMetadata, NoteTag,
-        NoteType,
+        Note, NoteAssets, NoteExecutionHint, NoteFile, NoteInputs, NoteMetadata, NoteRecipient,
+        NoteTag, NoteType,
     },
     testing::account_id::{
-        ACCOUNT_ID_PUBLIC_FUNGIBLE_FAUCET_1, ACCOUNT_ID_PUBLIC_FUNGIBLE_FAUCET_2,
-        ACCOUNT_ID_REGULAR_PRIVATE_ACCOUNT_UPDATABLE_CODE,
+        ACCOUNT_ID_PRIVATE_SENDER, ACCOUNT_ID_PUBLIC_FUNGIBLE_FAUCET_1,
+        ACCOUNT_ID_PUBLIC_FUNGIBLE_FAUCET_2, ACCOUNT_ID_REGULAR_PRIVATE_ACCOUNT_UPDATABLE_CODE,
         ACCOUNT_ID_REGULAR_PUBLIC_ACCOUNT_IMMUTABLE_CODE,
         ACCOUNT_ID_REGULAR_PUBLIC_ACCOUNT_UPDATABLE_CODE,
     },
@@ -49,7 +49,7 @@ use crate::{
     note::NoteRelevance,
     rpc::NodeRpcClient,
     store::{
-        InputNoteRecord, InputNoteState, NoteFilter, StoreError, TransactionFilter,
+        InputNoteRecord, InputNoteState, NoteFilter, TransactionFilter,
         input_note_states::ConsumedAuthenticatedLocalNoteState, sqlite_store::SqliteStore,
     },
     sync::NoteTagSource,
@@ -58,13 +58,13 @@ use crate::{
             ACCOUNT_ID_REGULAR, MINT_AMOUNT, RECALL_HEIGHT_DELTA, TRANSFER_AMOUNT,
             assert_account_has_single_asset, assert_note_cannot_be_consumed_twice, consume_notes,
             execute_failing_tx, execute_tx, execute_tx_and_sync, mint_and_consume, mint_note,
-            setup_two_wallets_and_faucet, setup_wallet_and_faucet, wait_for_node, wait_for_tx,
+            setup_two_wallets_and_faucet, setup_wallet_and_faucet, wait_for_tx,
         },
         mock::{MockClient, MockRpcApi},
     },
     transaction::{
-        DiscardCause, PaymentTransactionData, TransactionRequestBuilder, TransactionRequestError,
-        TransactionStatus,
+        DiscardCause, PaymentNoteDescription, SwapTransactionData, TransactionRequestBuilder,
+        TransactionRequestError, TransactionStatus,
     },
 };
 
@@ -92,19 +92,20 @@ pub async fn create_test_client_builder() -> (ClientBuilder, MockRpcApi, Filesys
     let arc_rpc_api = Arc::new(rpc_api.clone());
 
     let builder = ClientBuilder::new()
-        .with_rpc(arc_rpc_api)
-        .with_rng(Box::new(rng))
-        .with_store(store)
-        .with_filesystem_keystore(keystore_path.to_str().unwrap())
+        .rpc(arc_rpc_api)
+        .rng(Box::new(rng))
+        .store(store)
+        .filesystem_keystore(keystore_path.to_str().unwrap())
         .in_debug_mode(true)
-        .with_tx_graceful_blocks(None);
+        .tx_graceful_blocks(None);
 
     (builder, rpc_api, keystore)
 }
 
 pub async fn create_test_client() -> (MockClient, MockRpcApi, FilesystemKeyStore<StdRng>) {
     let (builder, rpc_api, keystore) = create_test_client_builder().await;
-    let client = builder.build().await.unwrap();
+    let mut client = builder.build().await.unwrap();
+    client.ensure_genesis_in_place().await.unwrap();
 
     (client, rpc_api, keystore)
 }
@@ -128,13 +129,10 @@ async fn insert_new_wallet(
     let mut init_seed = [0u8; 32];
     client.rng.fill_bytes(&mut init_seed);
 
-    let anchor_block = client.get_latest_epoch_block().await.unwrap();
-
     let (account, seed) = AccountBuilder::new(init_seed)
-        .anchor((&anchor_block).try_into().unwrap())
         .account_type(AccountType::RegularAccountImmutableCode)
         .storage_mode(storage_mode)
-        .with_component(RpoFalcon512::new(pub_key))
+        .with_auth_component(RpoFalcon512::new(pub_key))
         .with_component(BasicWallet)
         .build()
         .unwrap();
@@ -162,13 +160,10 @@ async fn insert_new_fungible_faucet(
     let max_supply = Felt::try_from(9_999_999_u64.to_le_bytes().as_slice())
         .expect("u64 can be safely converted to a field element");
 
-    let anchor_block = client.get_latest_epoch_block().await.unwrap();
-
     let (account, seed) = AccountBuilder::new(init_seed)
-        .anchor((&anchor_block).try_into().unwrap())
         .account_type(AccountType::FungibleFaucet)
         .storage_mode(storage_mode)
-        .with_component(RpoFalcon512::new(pub_key))
+        .with_auth_component(RpoFalcon512::new(pub_key))
         .with_component(BasicFungibleFaucet::new(symbol, 10, max_supply).unwrap())
         .build()
         .unwrap();
@@ -181,7 +176,7 @@ async fn insert_new_fungible_faucet(
 // ================================================================================================
 
 #[tokio::test]
-async fn test_input_notes_round_trip() {
+async fn input_notes_round_trip() {
     // generate test client with a random store name
     let (mut client, rpc_api, keystore) = create_test_client().await;
 
@@ -223,7 +218,7 @@ async fn test_input_notes_round_trip() {
 }
 
 #[tokio::test]
-async fn test_get_input_note() {
+async fn get_input_note() {
     // generate test client with a random store name
     let (mut client, rpc_api, _) = create_test_client().await;
     // Get note from mocked RPC backend since any note works here
@@ -317,6 +312,7 @@ async fn insert_same_account_twice_fails() {
     let account = Account::mock(
         ACCOUNT_ID_PUBLIC_FUNGIBLE_FAUCET_2,
         Felt::new(2),
+        RpoFalcon512::new(PublicKey::new(EMPTY_WORD)),
         TransactionKernel::testing_assembler(),
     );
 
@@ -325,13 +321,14 @@ async fn insert_same_account_twice_fails() {
 }
 
 #[tokio::test]
-async fn test_account_code() {
+async fn account_code() {
     // generate test client with a random store name
     let (mut client, _rpc_api, _) = create_test_client().await;
 
     let account = Account::mock(
         ACCOUNT_ID_REGULAR_PRIVATE_ACCOUNT_UPDATABLE_CODE,
         Felt::ZERO,
+        RpoFalcon512::new(PublicKey::new(EMPTY_WORD)),
         TransactionKernel::testing_assembler(),
     );
 
@@ -348,13 +345,14 @@ async fn test_account_code() {
 }
 
 #[tokio::test]
-async fn test_get_account_by_id() {
+async fn get_account_by_id() {
     // generate test client with a random store name
     let (mut client, _rpc_api, _) = create_test_client().await;
 
     let account = Account::mock(
         ACCOUNT_ID_REGULAR_PUBLIC_ACCOUNT_UPDATABLE_CODE,
         Felt::new(10),
+        RpoFalcon512::new(PublicKey::new(EMPTY_WORD)),
         TransactionKernel::assembler(),
     );
 
@@ -373,7 +371,7 @@ async fn test_get_account_by_id() {
 }
 
 #[tokio::test]
-async fn test_sync_state() {
+async fn sync_state() {
     // generate test client with a random store name
     let (mut client, rpc_api, _) = create_test_client().await;
 
@@ -420,7 +418,7 @@ async fn test_sync_state() {
 }
 
 #[tokio::test]
-async fn test_sync_state_mmr() {
+async fn sync_state_mmr() {
     // generate test client with a random store name
     let (mut client, rpc_api, keystore) = create_test_client().await;
     // Import note and create wallet so that synced notes do not get discarded (due to being
@@ -472,7 +470,7 @@ async fn test_sync_state_mmr() {
     // Try reconstructing the partial_mmr from what's in the database
     let partial_mmr = client.build_current_partial_mmr().await.unwrap();
     assert_eq!(partial_mmr.forest(), 6);
-    assert!(partial_mmr.open(0).unwrap().is_some()); // Account anchor block
+    assert!(partial_mmr.open(0).unwrap().is_none());
     assert!(partial_mmr.open(1).unwrap().is_some());
     assert!(partial_mmr.open(2).unwrap().is_none());
     assert!(partial_mmr.open(3).unwrap().is_none());
@@ -489,26 +487,26 @@ async fn test_sync_state_mmr() {
     partial_mmr.peaks().verify(block_4.commitment(), mmr_proof).unwrap();
 
     // the blocks for both notes should be stored as they are relevant for the client's accounts
-    // with the addition of the chain tip
-    assert_eq!(client.test_store().get_tracked_block_headers().await.unwrap().len(), 3);
+    assert_eq!(client.test_store().get_tracked_block_headers().await.unwrap().len(), 2);
 }
 
 #[tokio::test]
-async fn test_sync_state_tags() {
+async fn sync_state_tags() {
     // generate test client with a random store name
     let (mut client, rpc_api, _) = create_test_client().await;
 
     // Import first mockchain note as expected
     let expected_notes = rpc_api.get_available_notes();
-
     for tag in expected_notes.iter().map(|n| n.metadata().tag()) {
         client.add_note_tag(tag).await.unwrap();
     }
 
-    // assert that we have no  expected notes prior to syncing state
+    // assert that we have no expected notes prior to syncing state
     assert!(client.get_input_notes(NoteFilter::Expected).await.unwrap().is_empty());
 
     // sync state
+    // The mockchain API has one public note and one private note, so in the end we will have
+    // the public one in the client
     let sync_details = client.sync_state().await.unwrap();
 
     // verify that the client is synced to the latest block
@@ -517,14 +515,13 @@ async fn test_sync_state_tags() {
         rpc_api.get_block_header_by_number(None, false).await.unwrap().0.block_num()
     );
 
-    // as we are syncing with tags, the response should containt blocks for both notes but they
-    // shouldn't be stored as they are not relevant for the client's accounts. Only the chain
-    // tip should be stored in the database
+    assert_eq!(client.get_input_notes(NoteFilter::All).await.unwrap().len(), 1);
+    // as we are syncing with tags, the response should contain blocks for both notes
     assert_eq!(client.test_store().get_tracked_block_headers().await.unwrap().len(), 1);
 }
 
 #[tokio::test]
-async fn test_tags() {
+async fn tags() {
     // generate test client with a random store name
     let (mut client, _rpc_api, _) = create_test_client().await;
 
@@ -561,7 +558,7 @@ async fn test_tags() {
 }
 
 #[tokio::test]
-async fn test_mint_transaction() {
+async fn mint_transaction() {
     // generate test client with a random store name
     let (mut client, _rpc_api, keystore) = create_test_client().await;
 
@@ -585,11 +582,11 @@ async fn test_mint_transaction() {
 
     let transaction = client.new_transaction(faucet.id(), transaction_request).await.unwrap();
 
-    assert!(transaction.executed_transaction().account_delta().nonce().is_some());
+    assert_eq!(transaction.executed_transaction().account_delta().nonce_delta(), ONE);
 }
 
 #[tokio::test]
-async fn test_import_note_validation() {
+async fn import_note_validation() {
     // generate test client
     let (mut client, rpc_api, _) = create_test_client().await;
 
@@ -631,7 +628,7 @@ async fn test_import_note_validation() {
 }
 
 #[tokio::test]
-async fn test_transaction_request_expiration() {
+async fn transaction_request_expiration() {
     let (mut client, _, keystore) = create_test_client().await;
     client.sync_state().await.unwrap();
 
@@ -642,7 +639,7 @@ async fn test_transaction_request_expiration() {
             .unwrap();
 
     let transaction_request = TransactionRequestBuilder::new()
-        .with_expiration_delta(5)
+        .expiration_delta(5)
         .build_mint_fungible_asset(
             FungibleAsset::new(faucet.id(), 5u64).unwrap(),
             AccountId::try_from(ACCOUNT_ID_REGULAR_PUBLIC_ACCOUNT_IMMUTABLE_CODE).unwrap(),
@@ -659,7 +656,7 @@ async fn test_transaction_request_expiration() {
 }
 
 #[tokio::test]
-async fn test_import_processing_note_returns_error() {
+async fn import_processing_note_returns_error() {
     // generate test client with a random store name
     let (mut client, _rpc_api, keystore) = create_test_client().await;
     client.sync_state().await.unwrap();
@@ -688,12 +685,12 @@ async fn test_import_processing_note_returns_error() {
         client.new_transaction(faucet.id(), transaction_request.clone()).await.unwrap();
     client.submit_transaction(transaction).await.unwrap();
 
-    let note_id = transaction_request.expected_output_notes().next().unwrap().id();
+    let note_id = transaction_request.expected_output_own_notes().pop().unwrap().id();
     let note = client.get_input_note(note_id).await.unwrap().unwrap();
 
     let input = [(note.try_into().unwrap(), None)];
     let consume_note_request = TransactionRequestBuilder::new()
-        .with_unauthenticated_input_notes(input)
+        .unauthenticated_input_notes(input)
         .build()
         .unwrap();
     let transaction = client
@@ -714,47 +711,7 @@ async fn test_import_processing_note_returns_error() {
 }
 
 #[tokio::test]
-async fn test_no_nonce_change_transaction_request() {
-    let (mut client, _, keystore) = create_test_client().await;
-
-    client.sync_state().await.unwrap();
-
-    // Insert Account
-    let (regular_account, _seed) =
-        insert_new_wallet(&mut client, AccountStorageMode::Private, &keystore)
-            .await
-            .unwrap();
-
-    // Prepare transaction
-
-    let code = "
-        begin
-            push.1 push.2
-            # => [1, 2]
-            add push.3
-            # => [1+2, 3]
-            assert_eq
-        end
-        ";
-
-    let tx_script = client.compile_tx_script(vec![], code).unwrap();
-
-    let transaction_request =
-        TransactionRequestBuilder::new().with_custom_script(tx_script).build().unwrap();
-
-    let transaction_execution_result =
-        client.new_transaction(regular_account.id(), transaction_request).await.unwrap();
-
-    let result = client.testing_apply_transaction(transaction_execution_result).await;
-
-    assert!(matches!(
-        result,
-        Err(ClientError::StoreError(StoreError::AccountCommitmentAlreadyExists(_)))
-    ));
-}
-
-#[tokio::test]
-async fn test_note_without_asset() {
+async fn note_without_asset() {
     let (mut client, _rpc_api, keystore) = create_test_client().await;
 
     let (faucet, _seed) =
@@ -771,7 +728,7 @@ async fn test_note_without_asset() {
     // Create note without assets
     let serial_num = client.rng().draw_word();
     let recipient = utils::build_p2id_recipient(wallet.id(), serial_num).unwrap();
-    let tag = NoteTag::from_account_id(wallet.id(), NoteExecutionMode::Local).unwrap();
+    let tag = NoteTag::from_account_id(wallet.id());
     let metadata =
         NoteMetadata::new(wallet.id(), NoteType::Private, tag, NoteExecutionHint::always(), ZERO)
             .unwrap();
@@ -781,7 +738,7 @@ async fn test_note_without_asset() {
 
     // Create and execute transaction
     let transaction_request = TransactionRequestBuilder::new()
-        .with_own_output_notes(vec![OutputNote::Full(note)])
+        .own_output_notes(vec![OutputNote::Full(note)])
         .build()
         .unwrap();
 
@@ -796,7 +753,7 @@ async fn test_note_without_asset() {
     let note = Note::new(vault, metadata, recipient);
 
     let transaction_request = TransactionRequestBuilder::new()
-        .with_own_output_notes(vec![OutputNote::Full(note)])
+        .own_output_notes(vec![OutputNote::Full(note)])
         .build()
         .unwrap();
 
@@ -811,8 +768,7 @@ async fn test_note_without_asset() {
 
     let error = TransactionRequestBuilder::new()
         .build_pay_to_id(
-            PaymentTransactionData::new(vec![], faucet.id(), wallet.id()),
-            None,
+            PaymentNoteDescription::new(vec![], faucet.id(), wallet.id()),
             NoteType::Public,
             client.rng(),
         )
@@ -822,12 +778,11 @@ async fn test_note_without_asset() {
 
     let error = TransactionRequestBuilder::new()
         .build_pay_to_id(
-            PaymentTransactionData::new(
+            PaymentNoteDescription::new(
                 vec![Asset::Fungible(FungibleAsset::new(faucet.id(), 0).unwrap())],
                 faucet.id(),
                 wallet.id(),
             ),
-            None,
             NoteType::Public,
             client.rng(),
         )
@@ -837,8 +792,9 @@ async fn test_note_without_asset() {
 }
 
 #[tokio::test]
-async fn test_execute_program() {
+async fn execute_program() {
     let (mut client, _, keystore) = create_test_client().await;
+    let _ = client.sync_state().await.unwrap();
 
     let (wallet, _seed) = insert_new_wallet(&mut client, AccountStorageMode::Private, &keystore)
         .await
@@ -856,7 +812,7 @@ async fn test_execute_program() {
         end
         ";
 
-    let tx_script = client.compile_tx_script(vec![], code).unwrap();
+    let tx_script = client.script_builder().compile_tx_script(code).unwrap();
 
     let output_stack = client
         .execute_program(wallet.id(), tx_script, AdviceInputs::default(), BTreeSet::new())
@@ -872,7 +828,7 @@ async fn test_execute_program() {
 }
 
 #[tokio::test]
-async fn test_real_note_roundtrip() {
+async fn real_note_roundtrip() {
     let (mut client, _, keystore) = create_test_client().await;
     let (wallet, _seed) = insert_new_wallet(&mut client, AccountStorageMode::Private, &keystore)
         .await
@@ -894,7 +850,7 @@ async fn test_real_note_roundtrip() {
         )
         .unwrap();
 
-    let note_id = transaction_request.expected_output_notes().next().unwrap().id();
+    let note_id = transaction_request.expected_output_own_notes().pop().unwrap().id();
     let transaction = client.new_transaction(faucet.id(), transaction_request).await.unwrap();
     client.submit_transaction(transaction).await.unwrap();
 
@@ -920,9 +876,8 @@ async fn test_real_note_roundtrip() {
 }
 
 #[tokio::test]
-async fn test_added_notes() {
+async fn added_notes() {
     let (mut client, _, authenticator) = create_test_client().await;
-    wait_for_node(&mut client).await;
 
     let faucet_account_header =
         insert_new_fungible_faucet(&mut client, AccountStorageMode::Private, &authenticator)
@@ -951,9 +906,8 @@ async fn test_added_notes() {
 }
 
 #[tokio::test]
-async fn test_p2id_transfer() {
+async fn p2id_transfer() {
     let (mut client, _, authenticator) = create_test_client().await;
-    wait_for_node(&mut client).await;
 
     let (first_regular_account, second_regular_account, faucet_account_header) =
         setup_two_wallets_and_faucet(&mut client, AccountStorageMode::Private, &authenticator)
@@ -972,18 +926,17 @@ async fn test_p2id_transfer() {
     println!("Running P2ID tx...");
     let tx_request = TransactionRequestBuilder::new()
         .build_pay_to_id(
-            PaymentTransactionData::new(
+            PaymentNoteDescription::new(
                 vec![Asset::Fungible(asset)],
                 from_account_id,
                 to_account_id,
             ),
-            None,
             NoteType::Private,
             client.rng(),
         )
         .unwrap();
 
-    let note = tx_request.expected_output_notes().next().unwrap().clone();
+    let note = tx_request.expected_output_own_notes().pop().unwrap();
     let transaction_id = execute_tx(&mut client, from_account_id, tx_request).await;
 
     // Check that a note tag started being tracked for this note.
@@ -1033,7 +986,7 @@ async fn test_p2id_transfer() {
     assert_eq!(regular_account.vault().assets().count(), 1);
     let asset = regular_account.vault().assets().next().unwrap();
 
-    // Validate the transfered amounts
+    // Validate the transferred amounts
     if let Asset::Fungible(fungible_asset) = asset {
         assert_eq!(fungible_asset.amount(), MINT_AMOUNT - TRANSFER_AMOUNT);
     } else {
@@ -1054,9 +1007,8 @@ async fn test_p2id_transfer() {
 }
 
 #[tokio::test]
-async fn test_p2id_transfer_failing_not_enough_balance() {
+async fn p2id_transfer_failing_not_enough_balance() {
     let (mut client, _, authenticator) = create_test_client().await;
-    wait_for_node(&mut client).await;
 
     let (first_regular_account, second_regular_account, faucet_account_header) =
         setup_two_wallets_and_faucet(&mut client, AccountStorageMode::Private, &authenticator)
@@ -1074,12 +1026,11 @@ async fn test_p2id_transfer_failing_not_enough_balance() {
     println!("Running P2ID tx...");
     let tx_request = TransactionRequestBuilder::new()
         .build_pay_to_id(
-            PaymentTransactionData::new(
+            PaymentNoteDescription::new(
                 vec![Asset::Fungible(asset)],
                 from_account_id,
                 to_account_id,
             ),
-            None,
             NoteType::Private,
             client.rng(),
         )
@@ -1097,9 +1048,8 @@ async fn test_p2id_transfer_failing_not_enough_balance() {
 }
 
 #[tokio::test]
-async fn test_p2idr_transfer_consumed_by_target() {
+async fn p2ide_transfer_consumed_by_target() {
     let (mut client, _, authenticator) = create_test_client().await;
-    wait_for_node(&mut client).await;
 
     let (first_regular_account, second_regular_account, faucet_account_header) =
         setup_two_wallets_and_faucet(&mut client, AccountStorageMode::Private, &authenticator)
@@ -1158,15 +1108,15 @@ async fn test_p2idr_transfer_consumed_by_target() {
         .unwrap_or(0);
     let current_block_num = client.get_sync_height().await.unwrap();
     let asset = FungibleAsset::new(faucet_account_id, TRANSFER_AMOUNT).unwrap();
-    println!("Running P2IDR tx...");
+    println!("Running P2IDE tx...");
     let tx_request = TransactionRequestBuilder::new()
         .build_pay_to_id(
-            PaymentTransactionData::new(
+            PaymentNoteDescription::new(
                 vec![Asset::Fungible(asset)],
                 from_account_id,
                 to_account_id,
-            ),
-            Some(current_block_num + RECALL_HEIGHT_DELTA),
+            )
+            .with_reclaim_height(current_block_num + RECALL_HEIGHT_DELTA),
             NoteType::Private,
             client.rng(),
         )
@@ -1178,8 +1128,8 @@ async fn test_p2idr_transfer_consumed_by_target() {
     let notes = client.get_input_notes(NoteFilter::Committed).await.unwrap();
     assert!(!notes.is_empty());
 
-    // Make the `to_account_id` consume P2IDR note
-    let note_id = tx_request.expected_output_notes().next().unwrap().id();
+    // Make the `to_account_id` consume P2IDE note
+    let note_id = tx_request.expected_output_own_notes().pop().unwrap().id();
     println!("Consuming Note...");
     let tx_request = TransactionRequestBuilder::new().build_consume_notes(vec![note_id]).unwrap();
     execute_tx_and_sync(&mut client, to_account_id, tx_request).await;
@@ -1190,7 +1140,7 @@ async fn test_p2idr_transfer_consumed_by_target() {
     assert_eq!(regular_account.account().vault().assets().count(), 1);
     let asset = regular_account.account().vault().assets().next().unwrap();
 
-    // Validate the transfered amounts
+    // Validate the transferred amounts
     if let Asset::Fungible(fungible_asset) = asset {
         assert_eq!(fungible_asset.amount(), from_account_balance - TRANSFER_AMOUNT);
     } else {
@@ -1211,9 +1161,8 @@ async fn test_p2idr_transfer_consumed_by_target() {
 }
 
 #[tokio::test]
-async fn test_p2idr_transfer_consumed_by_sender() {
+async fn p2ide_transfer_consumed_by_sender() {
     let (mut client, mock_rpc_api, authenticator) = create_test_client().await;
-    wait_for_node(&mut client).await;
 
     let (first_regular_account, second_regular_account, faucet_account_header) =
         setup_two_wallets_and_faucet(&mut client, AccountStorageMode::Private, &authenticator)
@@ -1239,15 +1188,15 @@ async fn test_p2idr_transfer_consumed_by_sender() {
         .unwrap_or(0);
     let current_block_num = client.get_sync_height().await.unwrap();
     let asset = FungibleAsset::new(faucet_account_id, TRANSFER_AMOUNT).unwrap();
-    println!("Running P2IDR tx...");
+    println!("Running P2IDE tx...");
     let tx_request = TransactionRequestBuilder::new()
         .build_pay_to_id(
-            PaymentTransactionData::new(
+            PaymentNoteDescription::new(
                 vec![Asset::Fungible(asset)],
                 from_account_id,
                 to_account_id,
-            ),
-            Some(current_block_num + RECALL_HEIGHT_DELTA),
+            )
+            .with_reclaim_height(current_block_num + RECALL_HEIGHT_DELTA),
             NoteType::Private,
             client.rng(),
         )
@@ -1307,7 +1256,71 @@ async fn test_p2idr_transfer_consumed_by_sender() {
 }
 
 #[tokio::test]
-async fn test_get_consumable_notes() {
+async fn p2ide_timelocked() {
+    let (mut client, mock_rpc_api, authenticator) = create_test_client().await;
+
+    let (first_regular_account, second_regular_account, faucet_account_header) =
+        setup_two_wallets_and_faucet(&mut client, AccountStorageMode::Private, &authenticator)
+            .await;
+
+    let from_account_id = first_regular_account.id();
+    let to_account_id = second_regular_account.id();
+    let faucet_account_id = faucet_account_header.id();
+
+    // First Mint necessary token
+    mint_and_consume(&mut client, from_account_id, faucet_account_id, NoteType::Public).await;
+
+    let current_block_num = client.get_sync_height().await.unwrap();
+
+    let asset = FungibleAsset::new(faucet_account_id, TRANSFER_AMOUNT).unwrap();
+    let tx_request = TransactionRequestBuilder::new()
+        .build_pay_to_id(
+            PaymentNoteDescription::new(
+                vec![Asset::Fungible(asset)],
+                from_account_id,
+                to_account_id,
+            )
+            .with_timelock_height(current_block_num + RECALL_HEIGHT_DELTA)
+            .with_reclaim_height(current_block_num),
+            NoteType::Public,
+            client.rng(),
+        )
+        .unwrap();
+    let note = tx_request.expected_output_own_notes().pop().unwrap();
+
+    execute_tx_and_sync(&mut client, from_account_id, tx_request).await;
+
+    // Check that it's still too early to consume by both accounts
+    let tx_request = TransactionRequestBuilder::new().build_consume_notes(vec![note.id()]).unwrap();
+    let results = [
+        client.new_transaction(from_account_id, tx_request.clone()).await,
+        client.new_transaction(to_account_id, tx_request).await,
+    ];
+    assert!(results.iter().all(|result| {
+        result.as_ref().is_err_and(|err| {
+            matches!(
+                err,
+                ClientError::TransactionExecutorError(
+                    TransactionExecutorError::TransactionProgramExecutionFailed(_)
+                )
+            )
+        })
+    }));
+
+    // Wait to consume with the target account
+    mock_rpc_api.advance_blocks(RECALL_HEIGHT_DELTA);
+    client.sync_state().await.unwrap();
+
+    // Consume the note with the target account
+    let tx_request = TransactionRequestBuilder::new().build_consume_notes(vec![note.id()]).unwrap();
+    execute_tx_and_sync(&mut client, to_account_id, tx_request).await;
+
+    let target_account: Account = client.get_account(to_account_id).await.unwrap().unwrap().into();
+    assert_eq!(target_account.vault().get_balance(faucet_account_id).unwrap(), TRANSFER_AMOUNT);
+}
+
+#[tokio::test]
+async fn get_consumable_notes() {
     let (mut client, _, authenticator) = create_test_client().await;
 
     let (first_regular_account, second_regular_account, faucet_account_header) =
@@ -1336,15 +1349,15 @@ async fn test_get_consumable_notes() {
 
     // Do a transfer from first account to second account
     let asset = FungibleAsset::new(faucet_account_id, TRANSFER_AMOUNT).unwrap();
-    println!("Running P2IDR tx...");
+    println!("Running P2IDE tx...");
     let tx_request = TransactionRequestBuilder::new()
         .build_pay_to_id(
-            PaymentTransactionData::new(
+            PaymentNoteDescription::new(
                 vec![Asset::Fungible(asset)],
                 from_account_id,
                 to_account_id,
-            ),
-            Some(100.into()),
+            )
+            .with_reclaim_height(100.into()),
             NoteType::Private,
             client.rng(),
         )
@@ -1377,9 +1390,9 @@ async fn test_get_consumable_notes() {
 }
 
 #[tokio::test]
-async fn test_get_output_notes() {
+async fn get_output_notes() {
     let (mut client, _, authenticator) = create_test_client().await;
-
+    let _ = client.sync_state().await.unwrap();
     let (first_regular_account, faucet_account_header) =
         setup_wallet_and_faucet(&mut client, AccountStorageMode::Private, &authenticator).await;
 
@@ -1407,18 +1420,17 @@ async fn test_get_output_notes() {
     println!("Running P2ID tx...");
     let tx_request = TransactionRequestBuilder::new()
         .build_pay_to_id(
-            PaymentTransactionData::new(
+            PaymentNoteDescription::new(
                 vec![Asset::Fungible(asset)],
                 from_account_id,
                 random_account_id,
             ),
-            None,
             NoteType::Private,
             client.rng(),
         )
         .unwrap();
 
-    let output_note_id = tx_request.expected_output_notes().next().unwrap().id();
+    let output_note_id = tx_request.expected_output_own_notes().pop().unwrap().id();
 
     // Before executing, the output note is not found
     assert!(client.get_output_note(output_note_id).await.unwrap().is_none());
@@ -1431,11 +1443,10 @@ async fn test_get_output_notes() {
 }
 
 #[tokio::test]
-async fn test_account_rollback() {
+async fn account_rollback() {
     let (builder, rpc_api, authenticator) = create_test_client_builder().await;
 
-    let mut client =
-        builder.with_tx_graceful_blocks(Some(TX_GRACEFUL_BLOCKS)).build().await.unwrap();
+    let mut client = builder.tx_graceful_blocks(Some(TX_GRACEFUL_BLOCKS)).build().await.unwrap();
 
     client.sync_state().await.unwrap();
 
@@ -1454,8 +1465,7 @@ async fn test_account_rollback() {
 
     let tx_request = TransactionRequestBuilder::new()
         .build_pay_to_id(
-            PaymentTransactionData::new(vec![Asset::Fungible(asset)], account_id, account_id),
-            None,
+            PaymentNoteDescription::new(vec![Asset::Fungible(asset)], account_id, account_id),
             NoteType::Public,
             client.rng(),
         )
@@ -1522,13 +1532,11 @@ async fn test_account_rollback() {
 }
 
 #[tokio::test]
-async fn test_subsequent_discarded_transactions() {
+async fn subsequent_discarded_transactions() {
     let (mut client, rpc_api, keystore) = create_test_client().await;
 
     let (regular_account, faucet_account_header) =
         setup_wallet_and_faucet(&mut client, AccountStorageMode::Public, &keystore).await;
-
-    wait_for_node(&mut client).await;
 
     let account_id = regular_account.id();
     let faucet_account_id = faucet_account_header.id();
@@ -1539,10 +1547,9 @@ async fn test_subsequent_discarded_transactions() {
     // Create a transaction that will expire in 2 blocks
     let asset = FungibleAsset::new(faucet_account_id, TRANSFER_AMOUNT).unwrap();
     let tx_request = TransactionRequestBuilder::new()
-        .with_expiration_delta(2)
+        .expiration_delta(2)
         .build_pay_to_id(
-            PaymentTransactionData::new(vec![Asset::Fungible(asset)], account_id, account_id),
-            None,
+            PaymentNoteDescription::new(vec![Asset::Fungible(asset)], account_id, account_id),
             NoteType::Public,
             client.rng(),
         )
@@ -1561,8 +1568,7 @@ async fn test_subsequent_discarded_transactions() {
     let asset = FungibleAsset::new(faucet_account_id, TRANSFER_AMOUNT).unwrap();
     let tx_request = TransactionRequestBuilder::new()
         .build_pay_to_id(
-            PaymentTransactionData::new(vec![Asset::Fungible(asset)], account_id, account_id),
-            None,
+            PaymentNoteDescription::new(vec![Asset::Fungible(asset)], account_id, account_id),
             NoteType::Public,
             client.rng(),
         )
@@ -1612,5 +1618,188 @@ async fn test_subsequent_discarded_transactions() {
     assert_eq!(
         account_after_sync.account().commitment(),
         account_before_tx.account().commitment(),
+    );
+}
+
+#[tokio::test]
+async fn missing_recipient_digest() {
+    let (mut client, _, keystore) = create_test_client().await;
+
+    let (faucet, _seed) =
+        insert_new_fungible_faucet(&mut client, AccountStorageMode::Private, &keystore)
+            .await
+            .unwrap();
+
+    let dummy_recipient = NoteRecipient::new(
+        Word::default(),
+        WellKnownNote::SWAP.script(),
+        NoteInputs::new(vec![]).unwrap(),
+    );
+
+    let dummy_recipient_digest = dummy_recipient.digest();
+
+    let tx_request = TransactionRequestBuilder::new()
+        .expected_output_recipients(vec![dummy_recipient])
+        .build_mint_fungible_asset(
+            FungibleAsset::new(faucet.id(), 5u64).unwrap(),
+            AccountId::try_from(ACCOUNT_ID_PRIVATE_SENDER).unwrap(),
+            NoteType::Public,
+            client.rng(),
+        )
+        .unwrap();
+
+    let error = client.new_transaction(faucet.id(), tx_request).await.unwrap_err();
+
+    if let ClientError::MissingOutputRecipients(digests) = error {
+        assert!(digests == vec![dummy_recipient_digest]);
+    }
+}
+
+#[tokio::test]
+async fn input_note_checks() {
+    let (mut client, _, authenticator) = create_test_client().await;
+
+    let (wallet, faucet) =
+        setup_wallet_and_faucet(&mut client, AccountStorageMode::Private, &authenticator).await;
+
+    let mut mint_notes = vec![];
+    for _ in 0..10 {
+        mint_notes.push(mint_note(&mut client, wallet.id(), faucet.id(), NoteType::Public).await);
+    }
+
+    let duplicate_note_tx_request = TransactionRequestBuilder::new()
+        .build_consume_notes(vec![mint_notes[0].id(), mint_notes[0].id()]);
+
+    assert!(matches!(
+        duplicate_note_tx_request,
+        Err(TransactionRequestError::DuplicateInputNote(note_id)) if note_id == mint_notes[0].id()
+    ));
+
+    let tx_request = TransactionRequestBuilder::new()
+        .build_consume_notes(mint_notes.iter().map(InputNote::id).collect())
+        .unwrap();
+
+    let transaction = client.new_transaction(wallet.id(), tx_request).await.unwrap();
+
+    let input_notes = transaction.executed_transaction().input_notes().iter();
+
+    // Check that the input notes have the same order as the original notes
+    for (i, input_note) in input_notes.enumerate() {
+        assert_eq!(input_note.id(), mint_notes[i].id());
+    }
+
+    let tx_id = transaction.executed_transaction().id();
+    client.submit_transaction(transaction).await.unwrap();
+    wait_for_tx(&mut client, tx_id).await;
+
+    // Check that using consumed notes will return an error
+    let consumed_note_tx_request = TransactionRequestBuilder::new()
+        .build_consume_notes(vec![mint_notes[0].id()])
+        .unwrap();
+    let error = client.new_transaction(wallet.id(), consumed_note_tx_request).await.unwrap_err();
+
+    assert!(matches!(
+        error,
+        ClientError::TransactionRequestError(TransactionRequestError::InputNoteAlreadyConsumed(_))
+    ));
+
+    // Check that adding an authenticated note that is not tracked by the client will return an
+    // error
+    let missing_authenticated_note_tx_request = TransactionRequestBuilder::new()
+        .build_consume_notes(vec![EMPTY_WORD.into()])
+        .unwrap();
+    let error = client
+        .new_transaction(wallet.id(), missing_authenticated_note_tx_request)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        ClientError::TransactionRequestError(
+            TransactionRequestError::MissingAuthenticatedInputNote(_)
+        )
+    ));
+}
+
+#[tokio::test]
+async fn swap_chain_test() {
+    // This test simulates a "swap chain" scenario with multiple wallets and fungible assets.
+    // 1. It creates a number wallet/faucet pairs, each wallet holding an asset minted by its paired
+    //    faucet.
+    // 2. For each consecutive pair, it creates a swap transaction where wallet N offers its asset
+    //    and requests the asset of wallet N+1.
+    // 3. The last wallet, which didn't generate any swaps, holds the asset that the wallet N-1
+    //    requested, which in turn was the asset requested by wallet N-2, and so on.
+    // 4. The test then consumes all swap notes (in reverse order) in a single transaction against
+    //    the last wallet.
+    // 5. Although the last wallet doesn't contain any of the intermediate requested assets, it
+    //    should be able to consume the swap notes because it will hold the requested asset for each
+    //    step and gain the needed asset for the next. This can only happen if the notes are
+    //    consumed in the specified order.
+    // 6. Finally, it asserts that the last wallet now owns the asset originally held by the first
+    //    wallet, verifying that the whole swap chain was successful.
+
+    let (mut client, _, keystore) = create_test_client().await;
+
+    // Generate a few account pairs with a fungible asset that can be used for swaps.
+    let mut account_pairs = vec![];
+    for _ in 0..3 {
+        let (wallet, faucet) =
+            setup_wallet_and_faucet(&mut client, AccountStorageMode::Private, &keystore).await;
+        mint_and_consume(&mut client, wallet.id(), faucet.id(), NoteType::Private).await;
+        account_pairs.push((wallet, faucet));
+    }
+
+    // Generate swap notes.
+    // Except for the last, each wallet N will offer it's faucet N asset and request a faucet N+1
+    // asset.
+    let mut swap_notes = vec![];
+    for pairs in account_pairs.windows(2) {
+        let tx_request = TransactionRequestBuilder::new()
+            .build_swap(
+                &SwapTransactionData::new(
+                    pairs[0].0.id(),
+                    Asset::Fungible(FungibleAsset::new(pairs[0].1.id(), 1).unwrap()),
+                    Asset::Fungible(FungibleAsset::new(pairs[1].1.id(), 1).unwrap()),
+                ),
+                NoteType::Private,
+                client.rng(),
+            )
+            .unwrap();
+
+        // The notes are inserted in reverse order because the first note to be consumed will be the
+        // last one generated.
+        swap_notes.insert(0, tx_request.expected_output_own_notes()[0].id());
+        execute_tx_and_sync(&mut client, pairs[0].0.id(), tx_request).await;
+    }
+
+    // The last wallet didn't generate any swap notes and has the asset needed to start the swap
+    // chain.
+    let last_wallet = account_pairs.last().unwrap().0.id();
+
+    // Trying to consume the notes in another order will fail.
+    let tx_request = TransactionRequestBuilder::new()
+        .build_consume_notes(swap_notes.iter().rev().copied().collect())
+        .unwrap();
+    let error = client.new_transaction(last_wallet, tx_request).await.unwrap_err();
+    assert!(matches!(
+        error,
+        ClientError::TransactionExecutorError(
+            TransactionExecutorError::TransactionProgramExecutionFailed(_)
+        )
+    ));
+
+    let tx_request = TransactionRequestBuilder::new().build_consume_notes(swap_notes).unwrap();
+    execute_tx(&mut client, last_wallet, tx_request).await;
+
+    // At the end, the last wallet should have the asset of the first wallet.
+    let last_wallet_account = client.get_account(last_wallet).await.unwrap().unwrap();
+    assert_eq!(
+        last_wallet_account
+            .account()
+            .vault()
+            .get_balance(account_pairs[0].1.id())
+            .unwrap(),
+        1
     );
 }

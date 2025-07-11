@@ -1,9 +1,12 @@
 use std::error::Error;
 
 use miden_client::{ClientError, keystore::KeyStoreError};
+use miden_lib::utils::ScriptBuilderError;
 use miden_objects::{AccountError, AccountIdError, AssetError, NetworkIdError};
 use miette::Diagnostic;
 use thiserror::Error;
+
+use crate::CLIENT_BINARY_NAME;
 
 type SourceError = Box<dyn Error + Send + Sync>;
 
@@ -27,7 +30,9 @@ pub enum CliError {
     #[error("config error: {1}")]
     #[diagnostic(
         code(cli::config_error),
-        help("Check if the configuration file exists and is well-formed.")
+        help(
+            "Check if the configuration file exists and is well-formed. If it does not exist, run `{CLIENT_BINARY_NAME} init` command to create it."
+        )
     )]
     Config(#[source] SourceError, String),
     #[error("execute program error: {1}")]
@@ -63,6 +68,9 @@ pub enum CliError {
     #[error("parse error: {1}")]
     #[diagnostic(code(cli::parse_error), help("Check the inputs."))]
     Parse(#[source] SourceError, String),
+    #[error("script builder error")]
+    #[diagnostic(code(cli::script_builder_error))]
+    ScriptBuilder(#[from] ScriptBuilderError),
     #[error("transaction error: {1}")]
     #[diagnostic(code(cli::transaction_error))]
     Transaction(#[source] SourceError, String),
