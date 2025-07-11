@@ -6,6 +6,8 @@ use miden_objects::{AccountError, AccountIdError, AssetError, NetworkIdError};
 use miette::Diagnostic;
 use thiserror::Error;
 
+use crate::CLIENT_BINARY_NAME;
+
 type SourceError = Box<dyn Error + Send + Sync>;
 
 #[derive(Debug, Diagnostic, Error)]
@@ -28,7 +30,9 @@ pub enum CliError {
     #[error("config error: {1}")]
     #[diagnostic(
         code(cli::config_error),
-        help("Check if the configuration file exists and is well-formed.")
+        help(
+            "Check if the configuration file exists and is well-formed. If it does not exist, run `{CLIENT_BINARY_NAME} init` command to create it."
+        )
     )]
     Config(#[source] SourceError, String),
     #[error("execute program error: {1}")]
