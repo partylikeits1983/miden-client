@@ -2018,7 +2018,7 @@ dependencies = [
 
 [[package]]
 name = "miden-client-cli"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "assert_cmd",
  "clap 4.5.41",
